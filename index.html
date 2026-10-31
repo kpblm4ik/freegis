@@ -3,80 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FreeGIS — Конструктор транспортной инфраструктуры</title>
+    <title>FreeGIS — Конструктор инфраструктуры</title>
     
-    <!-- Подключаем стили Leaflet -->
-    <link rel="stylesheet" href="https://unpkg.com" />
+    <!-- Подключаем только ОДИН официальный скрипт Яндекса. Его телефон пропустит. -->
+    <script src="https://yandex.ru" type="text/javascript"></script>
     
     <style>
         html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            overflow: hidden;
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;
         }
-        /* Исправление бага отображения на мобильных */
         #map {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 100%;
-            z-index: 1;
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1; background-color: #e5e3db; /* Серый фон, чтобы понять, если карта упала */
         }
         #panel {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            right: 10px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 10px;
-            border-radius: 8px;
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            z-index: 1000; background: rgba(255, 255, 255, 0.95);
+            padding: 10px; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-            justify-content: space-between;
+            display: flex; flex-wrap: wrap; gap: 10px;
+            align-items: center; justify-content: space-between;
         }
-        .stats-container {
-            display: flex;
-            gap: 15px;
-        }
-        .stat-box h4 {
-            margin: 0 0 2px 0;
-            color: #7f8c8d;
-            font-size: 10px;
-            text-transform: uppercase;
-        }
-        .stat-box p, .stat-box select {
-            margin: 0;
-            font-size: 14px;
-            font-weight: bold;
-            color: #2c3e50;
-        }
-        .stat-box select {
-            padding: 2px 5px;
-            border-radius: 4px;
-            border: 1px solid #bdc3c7;
-            background: white;
-        }
-        .controls {
-            display: flex;
-            gap: 5px;
-        }
-        .btn {
-            background: #3498db;
-            color: white;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: bold;
-        }
+        .stats-container { display: flex; gap: 15px; }
+        .stat-box h4 { margin: 0 0 2px 0; color: #7f8c8d; font-size: 10px; text-transform: uppercase; }
+        .stat-box p, .stat-box select { margin: 0; font-size: 14px; font-weight: bold; color: #2c3e50; }
+        .stat-box select { padding: 2px 5px; border-radius: 4px; border: 1px solid #bdc3c7; }
+        .controls { display: flex; gap: 5px; }
+        .btn { background: #3498db; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
         .btn-active { background: #2ecc71 !important; }
         .btn-clear { background: #e74c3c; }
     </style>
@@ -86,12 +40,11 @@
     <div id="panel">
         <div class="stats-container">
             <div class="stat-box">
-                <h4>Тип транспорта</h4>
-                <!-- Добавили выбор типов транспорта -->
+                <h4>Транспорт</h4>
                 <select id="typeSelect">
                     <option value="60000000">Автодорога (2 полосы)</option>
-                    <option value="200000000">Трамвайная линия</option>
-                    <option value="250000000">Железная дорога (ЖД)</option>
+                    <option value="200000000">Трамвай</option>
+                    <option value="250000000">ЖД путь</option>
                 </select>
             </div>
             <div class="stat-box">
@@ -109,89 +62,109 @@
         </div>
     </div>
 
+    <!-- Контейнер для карты -->
     <div id="map"></div>
 
-<script src="https://unpkg.com"></script>
-    <script>
-        // ВАЖНО: Настраиваем проекцию Leaflet под стандарты Яндекса (EPSG:3395)
-        const map = L.map('map', { 
-            zoomControl: false,
-            crs: L.CRS.EPSG3395 
-        }).setView([55.7558, 37.6173], 10); // Центр на Москву
-        
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+    <script type="text/javascript">
+        // Ждем, пока Яндекс загрузит свои сервера
+        ymaps.ready(init);
 
-        // ПОДКЛЮЧЕНИЕ СЕРВЕРОВ ЯНДЕКСА: Загружаем растровую подложку дорожной карты
-        L.tileLayer('https://vec0{s}.maps.yandex.net/tiles?l=map&v=26.10.02-0&x={x}&y={y}&z={z}&scale=1&lang=ru_RU', {
-            subdomains: ['1', '2', '3', '4'],
-            maxZoom: 19,
-            attribution: '© Яндекс Карты | FreeGIS'
-        }).addTo(map);
+        function init() {
+            // Создаем карту Яндекса напрямую
+            const myMap = new ymaps.Map("map", {
+                center: [55.7558, 37.6173], // Москва
+                zoom: 10,
+                controls: ['zoomControl'] // Только кнопки зума
+            }, {
+                searchControlProvider: 'yandex#search'
+            });
 
-        let points = [];
-        let polyline = null;
-        let isDrawing = false;
+            let isDrawing = false;
+            let myPolyline = null;
+            let points = [];
 
-        const drawBtn = document.getElementById('drawBtn');
-        const clearBtn = document.getElementById('clearBtn');
-        const distanceEl = document.getElementById('distance');
-        const costEl = document.getElementById('cost');
-        const typeSelect = document.getElementById('typeSelect');
+            const drawBtn = document.getElementById('drawBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const distanceEl = document.getElementById('distance');
+            const costEl = document.getElementById('cost');
+            const typeSelect = document.getElementById('typeSelect');
 
-        drawBtn.addEventListener('click', () => {
-            isDrawing = !isDrawing;
-            if (isDrawing) {
-                drawBtn.innerText = 'Готово';
-                drawBtn.classList.add('btn-active');
-            } else {
-                drawBtn.innerText = 'Проложить';
-                drawBtn.classList.remove('btn-active');
-            }
-        });
+            // Режим рисования
+            drawBtn.addEventListener('click', () => {
+                isDrawing = !isDrawing;
+                if (isDrawing) {
+                    drawBtn.innerText = 'Готово';
+                    drawBtn.classList.add('btn-active');
+                    myMap.cursors.push('arrow');
+                } else {
+                    drawBtn.innerText = 'Проложить';
+                    drawBtn.classList.remove('btn-active');
+                    myMap.cursors.notifyReady();
+                }
+            });
 
-        typeSelect.addEventListener('change', calculateMetrics);
+            // Клик по карте Яндекса
+            myMap.events.add('click', function (e) {
+                if (!isDrawing) return;
 
-        clearBtn.addEventListener('click', () => {
-            points = [];
-            if (polyline) map.removeLayer(polyline);
-            polyline = null;
-            distanceEl.innerText = '0.00 км';
-            costEl.innerText = '0 млн ₽';
-        });
+                const coords = e.get('coords'); // Получаем [lat, lng] от Яндекса
+                points.push(coords);
 
-        map.on('click', (e) => {
-            if (!isDrawing) return;
-            const { lat, lng } = e.latlng;
-            points.push([lat, lng]);
+                let lineColor = '#3498db';
+                if (typeSelect.value == "200000000") lineColor = '#e67e22';
+                if (typeSelect.value == "250000000") lineColor = '#9b59b6';
 
-            let lineColor = '#3498db';
-            if (typeSelect.value == "200000000") lineColor = '#e67e22'; 
-            if (typeSelect.value == "250000000") lineColor = '#9b59b6'; 
+                if (!myPolyline) {
+                    // Создаем гео-линию Яндекса
+                    myPolyline = new ymaps.Polyline(points, {}, {
+                        strokeColor: lineColor,
+                        strokeWidth: 5,
+                        strokeOpacity: 0.8
+                    });
+                    myMap.geoObjects.add(myPolyline);
+                } else {
+                    // Обновляем точки существующей линии
+                    myPolyline.geometry.setCoordinates(points);
+                    myPolyline.options.set('strokeColor', lineColor);
+                }
 
-            if (!polyline) {
-                polyline = L.polyline(points, { color: lineColor, weight: 5, opacity: 0.8 }).addTo(map);
-            } else {
-                polyline.setLatLngs(points);
-                polyline.setStyle({ color: lineColor });
-            }
-            calculateMetrics();
-        });
+                calculateMetrics();
+            });
 
-        function calculateMetrics() {
-            if (points.length < 2) return;
-            let totalDistance = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                totalDistance += L.latLng(points[i]).distanceTo(L.latLng(points[i+1]));
-            }
-            const distanceKm = totalDistance / 1000;
-            const currentCostPerKm = parseFloat(typeSelect.value);
-            const totalCost = distanceKm * currentCostPerKm;
+            typeSelect.addEventListener('change', calculateMetrics);
 
-            distanceEl.innerText = `${distanceKm.toFixed(2)} км`;
-            if (totalCost >= 1000000) {
-                costEl.innerText = `${(totalCost / 1000000).toFixed(1)} млн ₽`;
-            } else {
-                costEl.innerText = `${(totalCost / 1000).toFixed(0)} тыс ₽`;
+            // Сброс
+            clearBtn.addEventListener('click', () => {
+                points = [];
+                if (myPolyline) {
+                    myMap.geoObjects.remove(myPolyline);
+                    myPolyline = null;
+                }
+                distanceEl.innerText = '0.00 км';
+                costEl.innerText = '0 млн ₽';
+            });
+
+            function calculateMetrics() {
+                if (points.length < 2) return;
+
+                let totalDistance = 0;
+                // Встроенный гео-калькулятор Яндекса, считает идеально с учетом кривизны Земли
+                for (let i = 0; i < points.length - 1; i++) {
+                    totalDistance += ymaps.coordSystem.geo.getDistance(points[i], points[i+1]);
+                }
+
+                const distanceKm = totalDistance / 1000;
+                const currentCostPerKm = parseFloat(typeSelect.value);
+                const totalCost = distanceKm * currentCostPerKm;
+
+                distanceEl.innerText = `${distanceKm.toFixed(2)} км`;
+                if (totalCost >= 1000000) {
+                    costEl.innerText = `${(totalCost / 1000000).toFixed(1)} млн ₽`;
+                } else {
+                    costEl.innerText = `${(totalCost / 1000).toFixed(0)} тыс ₽`;
+                }
             }
         }
     </script>
+</body>
+</html>
