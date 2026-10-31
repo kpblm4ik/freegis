@@ -1,4 +1,117 @@
-    <script src="https://unpkg.com"></script>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FreeGIS — Конструктор транспортной инфраструктуры</title>
+    
+    <!-- Подключаем стили Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com" />
+    
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            overflow: hidden;
+        }
+        /* Исправление бага отображения на мобильных */
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+            z-index: 1;
+        }
+        #panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .stats-container {
+            display: flex;
+            gap: 15px;
+        }
+        .stat-box h4 {
+            margin: 0 0 2px 0;
+            color: #7f8c8d;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .stat-box p, .stat-box select {
+            margin: 0;
+            font-size: 14px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .stat-box select {
+            padding: 2px 5px;
+            border-radius: 4px;
+            border: 1px solid #bdc3c7;
+            background: white;
+        }
+        .controls {
+            display: flex;
+            gap: 5px;
+        }
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .btn-active { background: #2ecc71 !important; }
+        .btn-clear { background: #e74c3c; }
+    </style>
+</head>
+<body>
+
+    <div id="panel">
+        <div class="stats-container">
+            <div class="stat-box">
+                <h4>Тип транспорта</h4>
+                <!-- Добавили выбор типов транспорта -->
+                <select id="typeSelect">
+                    <option value="60000000">Автодорога (2 полосы)</option>
+                    <option value="200000000">Трамвайная линия</option>
+                    <option value="250000000">Железная дорога (ЖД)</option>
+                </select>
+            </div>
+            <div class="stat-box">
+                <h4>Длина</h4>
+                <p id="distance">0.00 км</p>
+            </div>
+            <div class="stat-box">
+                <h4>Стоимость</h4>
+                <p id="cost">0 млн ₽</p>
+            </div>
+        </div>
+        <div class="controls">
+            <button class="btn" id="drawBtn">Проложить</button>
+            <button class="btn btn-clear" id="clearBtn">Сброс</button>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+<script src="https://unpkg.com"></script>
     <script>
         // ВАЖНО: Настраиваем проекцию Leaflet под стандарты Яндекса (EPSG:3395)
         const map = L.map('map', { 
