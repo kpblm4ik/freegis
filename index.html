@@ -1,0 +1,84 @@
+    <script src="https://unpkg.com"></script>
+    <script>
+        // ВАЖНО: Настраиваем проекцию Leaflet под стандарты Яндекса (EPSG:3395)
+        const map = L.map('map', { 
+            zoomControl: false,
+            crs: L.CRS.EPSG3395 
+        }).setView([55.7558, 37.6173], 10); // Центр на Москву
+        
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // ПОДКЛЮЧЕНИЕ СЕРВЕРОВ ЯНДЕКСА: Загружаем растровую подложку дорожной карты
+        L.tileLayer('https://vec0{s}.maps.yandex.net/tiles?l=map&v=26.10.02-0&x={x}&y={y}&z={z}&scale=1&lang=ru_RU', {
+            subdomains: ['1', '2', '3', '4'],
+            maxZoom: 19,
+            attribution: '© Яндекс Карты | FreeGIS'
+        }).addTo(map);
+
+        let points = [];
+        let polyline = null;
+        let isDrawing = false;
+
+        const drawBtn = document.getElementById('drawBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const distanceEl = document.getElementById('distance');
+        const costEl = document.getElementById('cost');
+        const typeSelect = document.getElementById('typeSelect');
+
+        drawBtn.addEventListener('click', () => {
+            isDrawing = !isDrawing;
+            if (isDrawing) {
+                drawBtn.innerText = 'Готово';
+                drawBtn.classList.add('btn-active');
+            } else {
+                drawBtn.innerText = 'Проложить';
+                drawBtn.classList.remove('btn-active');
+            }
+        });
+
+        typeSelect.addEventListener('change', calculateMetrics);
+
+        clearBtn.addEventListener('click', () => {
+            points = [];
+            if (polyline) map.removeLayer(polyline);
+            polyline = null;
+            distanceEl.innerText = '0.00 км';
+            costEl.innerText = '0 млн ₽';
+        });
+
+        map.on('click', (e) => {
+            if (!isDrawing) return;
+            const { lat, lng } = e.latlng;
+            points.push([lat, lng]);
+
+            let lineColor = '#3498db';
+            if (typeSelect.value == "200000000") lineColor = '#e67e22'; 
+            if (typeSelect.value == "250000000") lineColor = '#9b59b6'; 
+
+            if (!polyline) {
+                polyline = L.polyline(points, { color: lineColor, weight: 5, opacity: 0.8 }).addTo(map);
+            } else {
+                polyline.setLatLngs(points);
+                polyline.setStyle({ color: lineColor });
+            }
+            calculateMetrics();
+        });
+
+        function calculateMetrics() {
+            if (points.length < 2) return;
+            let totalDistance = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                totalDistance += L.latLng(points[i]).distanceTo(L.latLng(points[i+1]));
+            }
+            const distanceKm = totalDistance / 1000;
+            const currentCostPerKm = parseFloat(typeSelect.value);
+            const totalCost = distanceKm * currentCostPerKm;
+
+            distanceEl.innerText = `${distanceKm.toFixed(2)} км`;
+            if (totalCost >= 1000000) {
+                costEl.innerText = `${(totalCost / 1000000).toFixed(1)} млн ₽`;
+            } else {
+                costEl.innerText = `${(totalCost / 1000).toFixed(0)} тыс ₽`;
+            }
+        }
+    </script>
