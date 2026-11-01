@@ -30,3 +30,380 @@
   @media (min-width: 700px) {
     #panel { left: 12px; right: auto; bottom: auto; top: 12px; width: 330px; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,.2); }
   }
+  h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+
+  .types { display: flex; gap: 6px; flex-wrap: wrap; }
+  .type {
+    flex: 1 1 auto; border: 1.5px solid var(--line); background: #fff; color: var(--fg);
+    border-radius: 10px; padding: 8px 10px; font-size: 14px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; justify-content: center;
+  }
+  .type i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+  .type.active { border-color: var(--accent); background: #eff4ff; font-weight: 600; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat b { display: block; font-size: 22px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  #breakdown { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+  .actions { display: flex; gap: 8px; }
+  button.btn {
+    flex: 1; border: 0; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  button.btn.secondary { background: #eef1f6; color: var(--fg); }
+  button.btn.danger { background: #fee2e2; color: var(--danger); }
+  button.btn.on { background: #16a34a; }
+  button.btn:disabled { opacity: .45; cursor: default; }
+  #hint { font-size: 12px; color: var(--muted); min-height: 16px; }
+  .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-top-right { z-index: 1; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <div>
+    <h4>Транспорт</h4>
+    <div class="types" id="types"></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><h4>Длина</h4><b id="len">0.00 км</b></div>
+    <div class="stat"><h4>Стоимость</h4><b id="cost">0 млн ₽</b></div>
+  </div>
+  <div id="breakdown"></div>
+  <div id="hint"></div>
+  <div class="actions">
+    <button class="btn" id="draw">Проложить</button>
+    <button class="btn secondary" id="undo" title="Убрать последнюю точку">↶</button>
+    <button class="btn danger" id="reset">Сброс</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Настройки ----------
+  // Стоимость строительства, млн ₽ за 1 км. Меняйте под себя.
+  var TYPES = {
+    road: { name: 'Автодорога (2 полосы)', color: '#f5b301', casing: '#6b5200', costPerKm: 60 },
+    tram: { name: 'Трамвай',               color: '#e53935', casing: '#ffffff', costPerKm: 250 },
+    rail: { name: 'ЖД путь',               color: '#3a3f47', casing: '#ffffff', costPerKm: 150 }
+  };
+  var STORAGE_KEY = 'freegis.v1';
+  // OpenFreeMap: liberty | bright | positron | dark(как fiord)
+  var STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+  // ---------- Состояние ----------
+  var state = {
+    type: 'road',
+    drawing: false,
+    lines: [],                 // завершённые: {type, coords:[[lng,lat],...]}
+    cur: { type: 'road', coords: [] },
+    cursor: null
+  };
+
+  // ---------- Геометрия ----------
+  function haversineKm(a, b) {
+    var R = 6371.0088, toRad = Math.PI / 180;
+    var dLat = (b[1] - a[1]) * toRad, dLng = (b[0] - a[0]) * toRad;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(a[1] * toRad) * Math.cos(b[1] * toRad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+  function lineLengthKm(coords) {
+    var sum = 0;
+    for (var i = 1; i < coords.length; i++) sum += haversineKm(coords[i - 1], coords[i]);
+    return sum;
+  }
+  function allLines() {
+    var res = state.lines.slice();
+    if (state.cur.coords.length) res.push(state.cur);
+    return res;
+  }
+  function totals() {
+    var byType = {}, len = 0, cost = 0;
+    Object.keys(TYPES).forEach(function (k) { byType[k] = { km: 0, cost: 0 }; });
+    allLines().forEach(function (l) {
+      var km = lineLengthKm(l.coords), c = km * TYPES[l.type].costPerKm;
+      byType[l.type].km += km; byType[l.type].cost += c;
+      len += km; cost += c;
+    });
+    return { len: len, cost: cost, byType: byType };
+  }
+
+  // ---------- UI ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var fmt = function (n, d) { return n.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }); };
+
+  function buildTypeButtons() {
+    var box = $('types');
+    box.innerHTML = '';
+    Object.keys(TYPES).forEach(function (k) {
+      var b = document.createElement('button');
+      b.className = 'type' + (k === state.type ? ' active' : '');
+      b.type = 'button';
+      b.innerHTML = '<i style="background:' + TYPES[k].color + '"></i>' + TYPES[k].name;
+      b.onclick = function () { setType(k); };
+      box.appendChild(b);
+    });
+  }
+
+  function setType(k) {
+    // если рисуем и тип сменился — закрываем текущую линию, начинаем новую
+    if (state.drawing && state.cur.coords.length >= 2 && state.cur.type !== k) commitCurrent();
+    state.type = k;
+    state.cur.type = k;
+    buildTypeButtons();
+    refresh();
+  }
+
+  function updateHint() {
+    var h = '';
+    if (state.drawing) {
+      h = state.cur.coords.length
+        ? 'Тапайте по карте, чтобы добавить точки. «Готово» — завершить линию.'
+        : 'Тапните по карте, чтобы поставить первую точку.';
+    } else if (!allLines().length) {
+      h = 'Выберите тип и нажмите «Проложить».';
+    }
+    $('hint').textContent = h;
+  }
+
+  function updateStats() {
+    var t = totals();
+    $('len').textContent = fmt(t.len, 2) + ' км';
+    $('cost').textContent = t.cost > 0 && t.cost < 1
+      ? fmt(Math.round(t.cost * 1000), 0) + ' тыс. ₽'
+      : fmt(t.cost, t.cost < 100 ? 1 : 0) + ' млн ₽';
+    var parts = [];
+    Object.keys(TYPES).forEach(function (k) {
+      if (t.byType[k].km > 0) parts.push(TYPES[k].name + ': ' + fmt(t.byType[k].km, 2) + ' км · ' + fmt(t.byType[k].cost, 1) + ' млн ₽');
+    });
+    $('breakdown').innerHTML = parts.join('<br>');
+  }
+
+  function updateButtons() {
+    var d = $('draw');
+    d.textContent = state.drawing ? 'Готово' : 'Проложить';
+    d.classList.toggle('on', state.drawing);
+    $('undo').disabled = !(state.cur.coords.length || state.lines.length);
+    $('reset').disabled = !(state.cur.coords.length || state.lines.length);
+    $('map').classList.toggle('drawing', state.drawing);
+  }
+
+  // ---------- Данные карты ----------
+  var map;
+  var ready = false;
+
+  function lineFeatures() {
+    var f = [];
+    allLines().forEach(function (l) {
+      if (l.coords.length >= 2) f.push({ type: 'Feature', properties: { kind: l.type }, geometry: { type: 'LineString', coordinates: l.coords } });
+    });
+    return { type: 'FeatureCollection', features: f };
+  }
+  function pointFeatures() {
+    var f = [];
+    state.lines.forEach(function (l) {
+      l.coords.forEach(function (c, i) {
+        var end = i === 0 || i === l.coords.length - 1;
+        f.push({ type: 'Feature', properties: { end: end, active: false }, geometry: { type: 'Point', coordinates: c } });
+      });
+    });
+    state.cur.coords.forEach(function (c) {
+      f.push({ type: 'Feature', properties: { end: true, active: true }, geometry: { type: 'Point', coordinates: c } });
+    });
+    return { type: 'FeatureCollection', features: f };
+  }
+  function previewFeature() {
+    var c = state.cur.coords, f = [];
+    if (state.drawing && state.cursor && c.length) {
+      f.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [c[c.length - 1], state.cursor] } });
+    }
+    return { type: 'FeatureCollection', features: f };
+  }
+
+  function render() {
+    if (!ready) return;
+    map.getSource('fg-lines').setData(lineFeatures());
+    map.getSource('fg-points').setData(pointFeatures());
+    map.getSource('fg-preview').setData(previewFeature());
+  }
+
+  function addLayers() {
+    ['fg-lines', 'fg-points', 'fg-preview'].forEach(function (id) {
+      if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    });
+    var widthExpr = function (a, b, c) { return ['interpolate', ['linear'], ['zoom'], 8, a, 14, b, 18, c]; };
+    var isK = function (k) { return ['==', ['get', 'kind'], k]; };
+
+    // Автодорога
+    map.addLayer({ id: 'fg-road-casing', type: 'line', source: 'fg-lines', filter: isK('road'),
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': TYPES.road.casing, 'line-width': widthExpr(4, 9, 22) } });
+    map.addLayer({ id: 'fg-road', type: 'line', source: 'fg-lines', filter: isK('road'),
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': TYPES.road.color, 'line-width': widthExpr(2.5, 6, 18) } });
+    map.addLayer({ id: 'fg-road-center', type: 'line', source: 'fg-lines', filter: isK('road'),
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: { 'line-color': '#ffffff', 'line-width': widthExpr(0.5, 1, 2), 'line-dasharray': [3, 3] } });
+
+    // Трамвай
+    map.addLayer({ id: 'fg-tram-casing', type: 'line', source: 'fg-lines', filter: isK('tram'),
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': TYPES.tram.casing, 'line-width': widthExpr(4, 6.5, 12) } });
+    map.addLayer({ id: 'fg-tram', type: 'line', source: 'fg-lines', filter: isK('tram'),
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': TYPES.tram.color, 'line-width': widthExpr(2, 3.5, 7) } });
+
+    // ЖД
+    map.addLayer({ id: 'fg-rail-base', type: 'line', source: 'fg-lines', filter: isK('rail'),
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: { 'line-color': TYPES.rail.color, 'line-width': widthExpr(3, 5, 9) } });
+    map.addLayer({ id: 'fg-rail-dash', type: 'line', source: 'fg-lines', filter: isK('rail'),
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: { 'line-color': '#ffffff', 'line-width': widthExpr(1.5, 2.5, 5), 'line-dasharray': [2, 2] } });
+
+    // Предпросмотр сегмента до курсора
+    map.addLayer({ id: 'fg-preview', type: 'line', source: 'fg-preview',
+      paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [2, 2] } });
+
+    // Вершины
+    map.addLayer({ id: 'fg-points', type: 'circle', source: 'fg-points',
+      paint: {
+        'circle-radius': ['case', ['get', 'active'], 6, ['get', 'end'], 4, 2.5],
+        'circle-color': ['case', ['get', 'active'], '#2563eb', '#ffffff'],
+        'circle-stroke-color': '#1d2530',
+        'circle-stroke-width': 1.5
+      } });
+  }
+
+  // ---------- Действия ----------
+  function commitCurrent() {
+    if (state.cur.coords.length >= 2) state.lines.push({ type: state.cur.type, coords: state.cur.coords.slice() });
+    state.cur = { type: state.type, coords: [] };
+  }
+
+  function toggleDrawing() {
+    if (state.drawing) {
+      commitCurrent();
+      state.drawing = false;
+      state.cursor = null;
+    } else {
+      state.drawing = true;
+      state.cur = { type: state.type, coords: [] };
+    }
+    refresh();
+  }
+
+  function undo() {
+    if (state.cur.coords.length) {
+      state.cur.coords.pop();
+    } else if (state.lines.length) {
+      var last = state.lines.pop();
+      // возвращаем линию в редактирование, чтобы убирать точки по одной
+      if (state.drawing) { state.cur = { type: last.type, coords: last.coords.slice(0, -1) }; state.type = last.type; buildTypeButtons(); }
+    }
+    refresh();
+  }
+
+  function resetAll() {
+    if ((state.lines.length || state.cur.coords.length) && !confirm('Удалить все построенные объекты?')) return;
+    state.lines = [];
+    state.cur = { type: state.type, coords: [] };
+    state.drawing = false;
+    state.cursor = null;
+    refresh();
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.lines.concat(state.cur.coords.length >= 2 ? [state.cur] : []))); } catch (e) {}
+  }
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        state.lines = arr.filter(function (l) { return l && TYPES[l.type] && Array.isArray(l.coords) && l.coords.length >= 2; });
+      }
+    } catch (e) {}
+  }
+
+  function refresh() {
+    render();
+    updateStats();
+    updateButtons();
+    updateHint();
+    save();
+  }
+
+  // ---------- Карта ----------
+  function initMap() {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: STYLE_URL,
+      center: [37.62, 55.75],
+      zoom: 10,
+      maxZoom: 19,
+      attributionControl: { compact: true }
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+
+    map.on('load', function () {
+      addLayers();
+      ready = true;
+      refresh();
+      // подогнать вид под сохранённые объекты
+      var pts = [];
+      state.lines.forEach(function (l) { pts = pts.concat(l.coords); });
+      if (pts.length) {
+        var b = new maplibregl.LngLatBounds(pts[0], pts[0]);
+        pts.forEach(function (p) { b.extend(p); });
+        map.fitBounds(b, { padding: 80, duration: 0, maxZoom: 15 });
+      }
+    });
+
+    map.on('click', function (e) {
+      if (!state.drawing) return;
+      state.cur.type = state.type;
+      state.cur.coords.push([e.lngLat.lng, e.lngLat.lat]);
+      refresh();
+    });
+    map.on('mousemove', function (e) {
+      if (!state.drawing || !state.cur.coords.length) return;
+      state.cursor = [e.lngLat.lng, e.lngLat.lat];
+      render();
+    });
+    map.on('dblclick', function (e) {
+      if (state.drawing) e.preventDefault();
+    });
+    map.on('error', function (e) {
+      // ошибка загрузки тайлов/стиля — не ломаем приложение
+      if (e && e.error && console) console.warn('map error:', e.error.message || e.error);
+    });
+  }
+
+  // ---------- Старт ----------
+  $('draw').onclick = toggleDrawing;
+  $('undo').onclick = undo;
+  $('reset').onclick = resetAll;
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && state.drawing) toggleDrawing();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+  });
+
+  load();
+  buildTypeButtons();
+  updateStats();
+  updateButtons();
+  updateHint();
+
+  if (window.maplibregl) initMap();
+  else $('hint').textContent = 'Не удалось загрузить MapLibre GL. Проверьте интернет.';
+})();
+</script>
+</body>
+</html>
