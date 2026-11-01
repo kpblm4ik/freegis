@@ -1,166 +1,32 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FreeGIS — Конструктор инфраструктуры</title>
-    
-    <!-- Подключаем официальный скрипт Яндекса. Он гарантированно доступен в РФ -->
-    <script src="https://yandex.ru" type="text/javascript"></script>
-    
-    <style>
-        html, body {
-            margin: 0; padding: 0; width: 100%; height: 100%;
-            font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;
-            background-color: #e5e3db;
-        }
-        /* Жестко фиксируем карту на весь экран, чтобы WebView её не сжимал */
-        #map {
-            position: fixed !important;
-            top: 0; left: 0; 
-            width: 100vw !important; 
-            height: 100vh !important;
-            z-index: 1;
-        }
-        #panel {
-            position: absolute; top: 10px; left: 10px; right: 10px;
-            z-index: 1000; background: rgba(255, 255, 255, 0.95);
-            padding: 10px; border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-            display: flex; flex-wrap: wrap; gap: 10px;
-            align-items: center; justify-content: space-between;
-        }
-        .stats-container { display: flex; gap: 15px; }
-        .stat-box h4 { margin: 0 0 2px 0; color: #7f8c8d; font-size: 10px; text-transform: uppercase; }
-        .stat-box p, .stat-box select { margin: 0; font-size: 14px; font-weight: bold; color: #2c3e50; }
-        .stat-box select { padding: 2px 5px; border-radius: 4px; border: 1px solid #bdc3c7; background: white; }
-        .controls { display: flex; gap: 5px; }
-        .btn { background: #3498db; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
-        .btn-active { background: #2ecc71 !important; }
-        .btn-clear { background: #e74c3c; }
-    </style>
-</head>
-<body>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FreeGIS — Конструктор инфраструктуры</title>
+<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1d2530;
+    --muted: #6b7686;
+    --line: #e3e7ee;
+    --accent: #2563eb;
+    --danger: #dc2626;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); }
+  #map { position: fixed; inset: 0; }
+  #map.drawing, #map.drawing .maplibregl-canvas { cursor: crosshair; }
 
-    <div id="panel">
-        <div class="stats-container">
-            <div class="stat-box">
-                <h4>Транспорт</h4>
-                <select id="typeSelect">
-                    <option value="60000000">Автодорога (2 полосы)</option>
-                    <option value="200000000">Трамвай</option>
-                    <option value="250000000">ЖД путь</option>
-                </select>
-            </div>
-            <div class="stat-box">
-                <h4>Длина</h4>
-                <p id="distance">0.00 км</p>
-            </div>
-            <div class="stat-box">
-                <h4>Стоимость</h4>
-                <p id="cost">0 млн ₽</p>
-            </div>
-        </div>
-        <div class="controls">
-            <button class="btn" id="drawBtn">Проложить</button>
-            <button class="btn btn-clear" id="clearBtn">Сброс</button>
-        </div>
-    </div>
-
-    <!-- Контейнер для карты -->
-    <div id="map"></div>
-
-    <script type="text/javascript">
-        // Запуск инициализации после загрузки API Яндекса
-        ymaps.ready(init);
-
-        function init() {
-            const myMap = new ymaps.Map("map", {
-                center: [55.7558, 37.6173], // Москва
-                zoom: 10,
-                controls: ['zoomControl']
-            });
-
-            let isDrawing = false;
-            let myPolyline = null;
-            let points = [];
-
-            const drawBtn = document.getElementById('drawBtn');
-            const clearBtn = document.getElementById('clearBtn');
-            const distanceEl = document.getElementById('distance');
-            const costEl = document.getElementById('cost');
-            const typeSelect = document.getElementById('typeSelect');
-
-            drawBtn.addEventListener('click', function() {
-                isDrawing = !isDrawing;
-                if (isDrawing) {
-                    drawBtn.innerText = 'Готово';
-                    drawBtn.classList.add('btn-active');
-                } else {
-                    drawBtn.innerText = 'Проложить';
-                    drawBtn.classList.remove('btn-active');
-                }
-            });
-
-            // Идеальный обход ругани линтера Acode: достаем первый аргумент через arguments[0]
-            myMap.events.add('click', function () {
-                if (!isDrawing) return;
-
-                const eventObject = arguments[0]; 
-                const coords = eventObject.get('coords'); 
-                points.push(coords);
-
-                let lineColor = '#3498db';
-                if (typeSelect.value == "200000000") lineColor = '#e67e22';
-                if (typeSelect.value == "250000000") lineColor = '#9b59b6';
-
-                if (!myPolyline) {
-                    myPolyline = new ymaps.Polyline(points, {}, {
-                        strokeColor: lineColor,
-                        strokeWidth: 5,
-                        strokeOpacity: 0.8
-                    });
-                    myMap.geoObjects.add(myPolyline);
-                } else {
-                    myPolyline.geometry.setCoordinates(points);
-                    myPolyline.options.set('strokeColor', lineColor);
-                }
-
-                calculateMetrics();
-            });
-
-            typeSelect.addEventListener('change', calculateMetrics);
-
-            clearBtn.addEventListener('click', function() {
-                points = [];
-                if (myPolyline) {
-                    myMap.geoObjects.remove(myPolyline);
-                    myPolyline = null;
-                }
-                distanceEl.innerText = '0.00 км';
-                costEl.innerText = '0 млн ₽';
-            });
-
-            function calculateMetrics() {
-                if (points.length < 2) return;
-
-                let totalDistance = 0;
-                for (let i = 0; i < points.length - 1; i++) {
-                    totalDistance += ymaps.coordSystem.geo.getDistance(points[i], points[i+1]);
-                }
-
-                const distanceKm = totalDistance / 1000;
-                const currentCostPerKm = parseFloat(typeSelect.value);
-                const totalCost = distanceKm * currentCostPerKm;
-
-                distanceEl.innerText = distanceKm.toFixed(2) + ' км';
-                if (totalCost >= 1000000) {
-                    costEl.innerText = (totalCost / 1000000).toFixed(1) + ' млн ₽';
-                } else {
-                    costEl.innerText = (totalCost / 1000).toFixed(0) + ' тыс ₽';
-                }
-            }
-        }
-    </script>
-</body>
-</html>
+  #panel {
+    position: fixed; z-index: 5; left: 0; right: 0; bottom: 0;
+    background: var(--bg); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px rgba(0,0,0,.18);
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    display: grid; gap: 10px;
+  }
+  @media (min-width: 700px) {
+    #panel { left: 12px; right: auto; bottom: auto; top: 12px; width: 330px; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,.2); }
+  }
