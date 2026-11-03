@@ -96,7 +96,15 @@
   var STORAGE_KEY = 'freegis.v1';
   // OpenFreeMap: liberty | bright | positron
   var STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
-  // Запасная подложка, если векторный стиль не загрузился
+
+  // Автопереход на Яндекс Карты (yandex.html), если основная карта не загрузилась за FALLBACK_MS.
+  // Включайте (true) только после того, как в yandex.html вписан API-ключ.
+  // Построенные линии не теряются: обе страницы читают одно и то же сохранение.
+  var YANDEX_FALLBACK = false;
+  var YANDEX_URL = 'yandex.html';
+  var FALLBACK_MS = 5000;
+
+  // Запасная подложка OSM (работает, пока YANDEX_FALLBACK выключен)
   var FALLBACK_STYLE = {
     version: 8,
     sources: {
@@ -217,7 +225,8 @@
 
   // ---------- Данные карты ----------
   var map;
-  var ready = false;
+  var ready = false;      // стиль загружен, слои добавлены
+  var loaded = false;     // карта полностью загрузилась (стиль + первые тайлы)
   var usingFallback = false;
   var firstFit = true;
 
@@ -367,7 +376,16 @@
     save();
   }
 
-  // ---------- Карта ----------
+  // ---------- Запасные варианты ----------
+  // Переход на Яндекс Карты. Возвращает true, если переход начался.
+  function goYandex(reason) {
+    if (!YANDEX_FALLBACK) return false;
+    console.warn('FreeGIS: основная карта недоступна, открываю Яндекс Карты —', reason);
+    save();
+    location.replace(YANDEX_URL);
+    return true;
+  }
+
   function switchToFallback(reason) {
     if (usingFallback || !map) return;
     usingFallback = true;
@@ -376,6 +394,7 @@
     try { map.setStyle(FALLBACK_STYLE); } catch (e) { setStatus('Не удалось загрузить карту: ' + (e && e.message || e)); }
   }
 
+  // ---------- Карта ----------
   function initMap() {
     try {
       map = new maplibregl.Map({
@@ -387,7 +406,8 @@
         attributionControl: { compact: true }
       });
     } catch (e) {
-      // чаще всего — отключён WebGL / аппаратное ускорение
+      // чаще всего — отключён WebGL / аппаратное ускорение; Яндекс Карты работают и без него
+      if (goYandex('MapLibre не запустился: ' + (e && e.message || e))) return;
       setStatus('Карта не запустилась: ' + (e && e.message || e) + '. Проверьте, включён ли WebGL в браузере.');
       return;
     }
@@ -412,8 +432,16 @@
       }
     });
 
-    // если стиль не загрузился за 8 секунд — запасная подложка
-    setTimeout(function () { if (!ready) switchToFallback('таймаут загрузки стиля'); }, 8000);
+    // 'load' — стиль и первые тайлы реально пришли
+    map.on('load', function () { loaded = true; });
+
+    if (YANDEX_FALLBACK) {
+      // не загрузилась за FALLBACK_MS — уходим на Яндекс Карты
+      setTimeout(function () { if (!loaded) goYandex('таймаут ' + FALLBACK_MS + ' мс'); }, FALLBACK_MS);
+    } else {
+      // если стиль не загрузился за 8 секунд — запасная подложка OSM
+      setTimeout(function () { if (!ready) switchToFallback('таймаут загрузки стиля'); }, 8000);
+    }
 
     map.on('click', function (e) {
       if (!state.drawing) return;
@@ -432,8 +460,9 @@
     map.on('error', function (e) {
       var msg = e && e.error && (e.error.message || String(e.error)) || 'unknown';
       console.warn('map error:', msg);
-      // ошибка самого стиля (до его загрузки) — уходим на запасную подложку
-      if (!ready) switchToFallback(msg);
+      // ошибка самого стиля (до его загрузки) — запасная подложка OSM.
+      // При включённом переходе на Яндекс решает таймер выше.
+      if (!ready && !YANDEX_FALLBACK) switchToFallback(msg);
     });
   }
 
@@ -468,7 +497,7 @@
   if (window.maplibregl) initMap();
   else loadScript(JS_URLS, function (ok) {
     if (ok && window.maplibregl) initMap();
-    else setStatus('Не удалось загрузить MapLibre GL ни с одного CDN. Проверьте интернет или отключите блокировщики.');
+    else if (!goYandex('не загрузился скрипт MapLibre')) setStatus('Не удалось загрузить MapLibre GL ни с одного CDN. Проверьте интернет или отключите блокировщики.');
   });
 })();
 </script>
