@@ -7,389 +7,380 @@
 <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet"
       onerror="this.onerror=null;this.href='https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css'">
 <style>
-  :root {
-    --bg: #ffffff;
-    --fg: #1d2530;
-    --muted: #6b7686;
-    --line: #e3e7ee;
-    --accent: #2563eb;
-    --danger: #dc2626;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: #e8ecf1; }
-  #map { position: fixed; inset: 0; }
-  #map.drawing, #map.drawing .maplibregl-canvas { cursor: crosshair; }
+  :root { --bg:#fff; --fg:#1d2530; --muted:#6b7686; --line:#e3e7ee; --accent:#2563eb; --danger:#dc2626; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  [hidden] { display:none !important; }
+  html,body { margin:0; height:100%; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--fg); background:#e8ecf1; }
+  #map { position:fixed; inset:0; }
+  #map.drawing, #map.drawing .maplibregl-canvas { cursor:crosshair; }
+  .maplibregl-ctrl-bottom-right,.maplibregl-ctrl-top-right { z-index:1; }
 
-  #panel {
-    position: fixed; z-index: 5; left: 0; right: 0; bottom: 0;
-    background: var(--bg); border-radius: 16px 16px 0 0;
-    box-shadow: 0 -4px 20px rgba(0,0,0,.18);
-    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
-    display: grid; gap: 10px;
-  }
-  @media (min-width: 700px) {
-    #panel { left: 12px; right: auto; bottom: auto; top: 12px; width: 330px; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,.2); }
-  }
-  h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  #pen { position:fixed; z-index:6; top:12px; left:12px; width:42px; height:42px; border:0; border-radius:50%;
+         background:var(--bg); font-size:20px; box-shadow:0 2px 10px rgba(0,0,0,.25); cursor:pointer; }
+  #hud { position:fixed; z-index:6; top:12px; left:62px; height:42px; padding:0 12px; display:flex; align-items:center;
+         background:var(--bg); border-radius:21px; font-size:13px; font-weight:600; box-shadow:0 2px 10px rgba(0,0,0,.25); }
+  #status { position:fixed; z-index:6; top:60px; left:12px; right:60px; font-size:12px; color:var(--danger); background:#fff; border-radius:8px; padding:6px 10px; }
+  #status:empty { display:none; }
 
-  .types { display: flex; gap: 6px; flex-wrap: wrap; }
-  .type {
-    flex: 1 1 auto; border: 1.5px solid var(--line); background: #fff; color: var(--fg);
-    border-radius: 10px; padding: 8px 10px; font-size: 14px; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 6px; justify-content: center;
-  }
-  .type i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
-  .type.active { border-color: var(--accent); background: #eff4ff; font-weight: 600; }
+  #menu { position:fixed; z-index:5; left:0; right:0; bottom:0; max-height:72vh; overflow:auto; background:var(--bg);
+          border-radius:16px 16px 0 0; box-shadow:0 -4px 20px rgba(0,0,0,.2); padding:10px 14px calc(14px + env(safe-area-inset-bottom)); }
+  @media (min-width:700px) { #menu { left:12px; right:auto; bottom:auto; top:64px; width:350px; max-height:calc(100vh - 80px); border-radius:14px; } }
+  .tabs { display:flex; gap:6px; position:sticky; top:-10px; background:var(--bg); padding:2px 0 8px; }
+  .tabs button { flex:1; border:0; padding:9px 4px; border-radius:9px; background:#eef1f6; font-size:14px; cursor:pointer; color:var(--fg); }
+  .tabs button.on { background:var(--accent); color:#fff; font-weight:600; }
+  h4 { margin:12px 0 6px; font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+  .grid { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { border:1.5px solid var(--line); background:#fff; color:var(--fg); border-radius:10px; padding:8px 10px; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .chip.on { border-color:var(--accent); background:#eff4ff; font-weight:600; }
+  .chip i { width:14px; height:14px; border-radius:4px; display:inline-block; border:1px solid #0003; }
+  .row { display:flex; align-items:center; gap:8px; margin:8px 0; font-size:14px; }
+  .row input[type=number] { width:64px; padding:6px; font-size:15px; border:1.5px solid var(--line); border-radius:8px; }
+  .row input[type=checkbox] { width:20px; height:20px; }
+  .veh { justify-content:space-between; margin:10px 0 2px; }
+  .veh .cnt { display:flex; align-items:center; gap:10px; }
+  .veh .cnt button { width:34px; height:34px; border:0; border-radius:50%; background:#eef1f6; font-size:18px; cursor:pointer; }
+  .muted { font-size:12px; color:var(--muted); line-height:1.4; }
+  .warn { font-size:12px; color:var(--danger); }
+  .btn { width:100%; border:0; border-radius:10px; padding:12px; font-size:15px; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; margin-top:10px; }
+  .btn.danger { background:#fee2e2; color:var(--danger); }
 
-  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .stat b { display: block; font-size: 22px; line-height: 1.15; font-variant-numeric: tabular-nums; }
-  #breakdown { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
-
-  .actions { display: flex; gap: 8px; }
-  button.btn {
-    flex: 1; border: 0; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer;
-    background: var(--accent); color: #fff;
-  }
-  button.btn.secondary { background: #eef1f6; color: var(--fg); }
-  button.btn.danger { background: #fee2e2; color: var(--danger); }
-  button.btn.on { background: #16a34a; }
-  button.btn:disabled { opacity: .45; cursor: default; }
-  #hint { font-size: 12px; color: var(--muted); min-height: 16px; }
-  #status { font-size: 12px; color: var(--danger); }
-  #status:empty { display: none; }
-  .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-top-right { z-index: 1; }
+  #bar { position:fixed; z-index:6; left:50%; transform:translateX(-50%); bottom:calc(14px + env(safe-area-inset-bottom)); display:flex; align-items:center; gap:8px;
+         background:var(--bg); padding:8px 10px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,.25); max-width:96vw; }
+  #bar button { border:0; border-radius:10px; padding:10px 14px; font-size:15px; font-weight:600; cursor:pointer; background:#16a34a; color:#fff; }
+  #bar button.sec { background:#eef1f6; color:var(--fg); }
+  #bar button:disabled { opacity:.45; }
+  #hint { font-size:12px; color:var(--muted); max-width:150px; }
+  .sign { font-size:24px; line-height:1; cursor:pointer; filter:drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<button id="pen" title="Меню">✏️</button>
+<div id="hud"></div>
+<div id="status"></div>
 
-<div id="panel">
-  <div>
-    <h4>Транспорт</h4>
-    <div class="types" id="types"></div>
+<div id="menu" hidden>
+  <div class="tabs">
+    <button data-act="tab" data-k="roads">Дороги</button>
+    <button data-act="tab" data-k="veh">Транспорт</button>
+    <button data-act="tab" data-k="staff">Персонал</button>
   </div>
-  <div class="stats">
-    <div class="stat"><h4>Длина</h4><b id="len">0.00 км</b></div>
-    <div class="stat"><h4>Стоимость</h4><b id="cost">0 млн ₽</b></div>
-  </div>
-  <div id="breakdown"></div>
-  <div id="hint"></div>
-  <div id="status"></div>
-  <div class="actions">
-    <button class="btn" id="draw">Проложить</button>
-    <button class="btn secondary" id="undo" title="Убрать последнюю точку">↶</button>
-    <button class="btn danger" id="reset">Сброс</button>
-  </div>
+  <div id="body"></div>
+</div>
+
+<div id="bar" hidden>
+  <span id="hint"></span>
+  <button id="bDone">Готово</button>
+  <button id="bUndo" class="sec" title="Отменить">↶</button>
 </div>
 
 <script>
 (function () {
   'use strict';
 
-  // ---------- Настройки ----------
-  // Стоимость строительства, млн ₽ за 1 км. Меняйте под себя.
-  var TYPES = {
-    road: { name: 'Автодорога (2 полосы)', color: '#f5b301', casing: '#6b5200', costPerKm: 60 },
-    tram: { name: 'Трамвай',               color: '#e53935', casing: '#ffffff', costPerKm: 250 },
-    rail: { name: 'ЖД путь',               color: '#3a3f47', casing: '#ffffff', costPerKm: 150 }
+  // ---------- Справочники (цены в млн ₽ — ориентировочные, правьте под себя) ----------
+  // Дороги: cost — млн ₽ за 1 км (для асфальта — за 1 полосу), w — относительная ширина
+  var ROADS = {
+    rail1520: { n: 'ЖД 1520 мм',           c: '#3a3f47', b: '#ffffff', w: 1.6, cost: 150, rail: 1 },
+    rail750:  { n: 'ЖД 750 мм (трамвай)',  c: '#e53935', b: '#ffffff', w: 1,   cost: 80,  rail: 1 },
+    asphalt:  { n: 'Асфальт',              c: '#6b7280', b: '#374151', w: 1,   cost: 30,  lane: 1 },
+    gravel:   { n: 'Щебень',               c: '#cbd5e1', b: '#64748b', w: 1.4, cost: 15 },
+    dirt:     { n: 'Грунт',                c: '#a16207', b: '#fde68a', w: 1.2, cost: 5 }
   };
-  var STORAGE_KEY = 'freegis.v1';
-  // OpenFreeMap: liberty | bright | positron
+  var SIGNS = { stop: ['🛑', 'Стоп'], yield: ['🔻', 'Уступи дорогу'], cross: ['🚸', 'Пешеходный переход'], limit: ['⛔', 'Ограничение скорости'] };
+  var ROLES = { drvC: 'Водитель кат. C', drvD: 'Водитель кат. D', exc: 'Машинист экскаватора', doz: 'Машинист бульдозера',
+                ldr: 'Машинист погрузчика', rol: 'Машинист катка', crn: 'Машинист автокрана' };
+  // Техника: cost — млн ₽ за единицу, r — нужная должность (1 человек на машину)
+  var VEH = {
+    dump:  { n: 'Самосвал',   i: '🚚', cost: 8,  r: 'drvC' },
+    truck: { n: 'Грузовик',   i: '🚛', cost: 6,  r: 'drvC' },
+    bus:   { n: 'Автобус',    i: '🚌', cost: 12, r: 'drvD' },
+    exc:   { n: 'Экскаватор', i: '⛏️', cost: 15, r: 'exc' },
+    doz:   { n: 'Бульдозер',  i: '🚜', cost: 18, r: 'doz' },
+    ldr:   { n: 'Погрузчик',  i: '📦', cost: 8,  r: 'ldr' },
+    rol:   { n: 'Каток',      i: '🛣️', cost: 7,  r: 'rol' },
+    crn:   { n: 'Автокран',   i: '🏗️', cost: 20, r: 'crn' }
+  };
+  var STORAGE_KEY = 'freegis.v2';
   var STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+  var JS_URLS = ['https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js',
+                 'https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js'];
 
-  // Автопереход на Яндекс Карты (yandex.html), если основная карта не загрузилась за FALLBACK_MS.
-  // Включайте (true) только после того, как в yandex.html вписан API-ключ.
-  // Построенные линии не теряются: обе страницы читают одно и то же сохранение.
-  var YANDEX_FALLBACK = false;
-  var YANDEX_URL = 'yandex.html';
-  var FALLBACK_MS = 5000;
-
-  // Запасная подложка OSM (работает, пока YANDEX_FALLBACK выключен)
-  var FALLBACK_STYLE = {
-    version: 8,
-    sources: {
-      osm: {
-        type: 'raster',
-        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        maxzoom: 19,
-        attribution: '© OpenStreetMap contributors'
-      }
-    },
-    layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
-  };
-  // Скрипт MapLibre: основной CDN и запасной (версия зафиксирована)
-  var JS_URLS = [
-    'https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js',
-    'https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js'
-  ];
+  // Автопереход на Яндекс Карты, если основная не загрузилась за FALLBACK_MS.
+  // Включать (true) после того, как в yandex.html вписан ключ. ВНИМАНИЕ: yandex.html пока читает старое
+  // сохранение (freegis.v1), новые типы дорог, техника и персонал там не отображаются.
+  var YANDEX_FALLBACK = false, YANDEX_URL = 'yandex.html', FALLBACK_MS = 5000;
+  var FALLBACK_STYLE = { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors' } },
+                         layers: [{ id: 'osm', type: 'raster', source: 'osm' }] };
 
   // ---------- Состояние ----------
   var state = {
-    type: 'road',
-    drawing: false,
-    lines: [],                 // завершённые: {type, coords:[[lng,lat],...]}
-    cur: { type: 'road', coords: [] },
-    cursor: null
+    tab: 'roads', kind: 'asphalt', lanes: 2,
+    drawing: false, signMode: null,
+    lines: [],                                  // {kind, lanes, coords:[[lng,lat],...]}
+    cur: { kind: 'asphalt', lanes: 2, coords: [] },
+    cursor: null, markAuto: true,
+    signs: [],                                  // {k, c:[lng,lat]}
+    fleet: {},                                  // {dump: 3, ...}
+    staff: []                                   // {r, bad}
   };
 
-  // ---------- Геометрия ----------
-  function haversineKm(a, b) {
-    var R = 6371.0088, toRad = Math.PI / 180;
-    var dLat = (b[1] - a[1]) * toRad, dLng = (b[0] - a[0]) * toRad;
-    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(a[1] * toRad) * Math.cos(b[1] * toRad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
-  }
-  function lineLengthKm(coords) {
-    var sum = 0;
-    for (var i = 1; i < coords.length; i++) sum += haversineKm(coords[i - 1], coords[i]);
-    return sum;
-  }
-  function allLines() {
-    var res = state.lines.slice();
-    if (state.cur.coords.length) res.push(state.cur);
-    return res;
-  }
-  function totals() {
-    var byType = {}, len = 0, cost = 0;
-    Object.keys(TYPES).forEach(function (k) { byType[k] = { km: 0, cost: 0 }; });
-    allLines().forEach(function (l) {
-      var km = lineLengthKm(l.coords), c = km * TYPES[l.type].costPerKm;
-      byType[l.type].km += km; byType[l.type].cost += c;
-      len += km; cost += c;
-    });
-    return { len: len, cost: cost, byType: byType };
-  }
-
-  // ---------- UI ----------
+  // ---------- Вспомогательное ----------
   var $ = function (id) { return document.getElementById(id); };
   var fmt = function (n, d) { return n.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }); };
-  function setStatus(msg) { $('status').textContent = msg || ''; }
+  var setStatus = function (m) { $('status').textContent = m || ''; };
 
-  function buildTypeButtons() {
-    var box = $('types');
-    box.innerHTML = '';
-    Object.keys(TYPES).forEach(function (k) {
-      var b = document.createElement('button');
-      b.className = 'type' + (k === state.type ? ' active' : '');
-      b.type = 'button';
-      b.innerHTML = '<i style="background:' + TYPES[k].color + '"></i>' + TYPES[k].name;
-      b.onclick = function () { setType(k); };
-      box.appendChild(b);
+  function km(a, b) {
+    var r = Math.PI / 180, dLa = (b[1] - a[1]) * r, dLo = (b[0] - a[0]) * r;
+    var s = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return 12742.0176 * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+  function lineKm(c) { var s = 0; for (var i = 1; i < c.length; i++) s += km(c[i - 1], c[i]); return s; }
+  function allLines() { return state.cur.coords.length ? state.lines.concat([state.cur]) : state.lines; }
+  function lineCost(l, k) { return k * ROADS[l.kind].cost * (ROADS[l.kind].lane ? l.lanes : 1); }
+  function totals() {
+    var by = {}, len = 0, cost = 0;
+    allLines().forEach(function (l) {
+      var k = lineKm(l.coords), c = lineCost(l, k);
+      by[l.kind] = by[l.kind] || { km: 0, cost: 0 };
+      by[l.kind].km += k; by[l.kind].cost += c; len += k; cost += c;
+    });
+    return { by: by, len: len, cost: cost };
+  }
+  function fleetCost() { return Object.keys(VEH).reduce(function (s, k) { return s + (state.fleet[k] || 0) * VEH[k].cost; }, 0); }
+  function roleStat(r) { var a = state.staff.filter(function (p) { return p.r === r; }); return { n: a.length, bad: a.filter(function (p) { return p.bad; }).length }; }
+
+  // Должности вытекают из техники: 1 человек на машину
+  function syncStaff() {
+    var need = {};
+    Object.keys(VEH).forEach(function (k) { need[VEH[k].r] = (need[VEH[k].r] || 0) + (state.fleet[k] || 0); });
+    Object.keys(ROLES).forEach(function (r) {
+      var have = state.staff.filter(function (p) { return p.r === r; }).length, n = need[r] || 0;
+      for (var i = have; i < n; i++) state.staff.push({ r: r, bad: false });
+      for (var j = state.staff.length - 1; j >= 0 && have > n; j--) if (state.staff[j].r === r) { state.staff.splice(j, 1); have--; }
     });
   }
 
-  function setType(k) {
-    // если рисуем и тип сменился — закрываем текущую линию, начинаем новую
-    if (state.drawing && state.cur.coords.length >= 2 && state.cur.type !== k) commitCurrent();
-    state.type = k;
-    state.cur.type = k;
-    buildTypeButtons();
-    refresh();
-  }
-
-  function updateHint() {
-    var h = '';
-    if (state.drawing) {
-      h = state.cur.coords.length
-        ? 'Тапайте по карте, чтобы добавить точки. «Готово» — завершить линию.'
-        : 'Тапните по карте, чтобы поставить первую точку.';
-    } else if (!allLines().length) {
-      h = 'Выберите тип и нажмите «Проложить».';
+  // ---------- Меню ----------
+  function roadsHtml() {
+    var h = '<h4>Тип дороги</h4><div class="grid">';
+    Object.keys(ROADS).forEach(function (k) {
+      h += '<button class="chip' + (k === state.kind ? ' on' : '') + '" data-act="kind" data-k="' + k + '"><i style="background:' + ROADS[k].c + '"></i>' + ROADS[k].n + '</button>';
+    });
+    h += '</div>';
+    if (ROADS[state.kind].lane) h += '<label class="row">Количество полос: <input id="lanes" type="number" min="1" max="8" value="' + state.lanes + '"></label>';
+    h += '<button class="btn" data-act="draw">✏️ Проложить</button>';
+    h += '<h4>Разметка и знаки</h4><div class="grid">' +
+         '<button class="chip' + (state.markAuto ? ' on' : '') + '" data-act="mark" data-v="1">Авто</button>' +
+         '<button class="chip' + (!state.markAuto ? ' on' : '') + '" data-act="mark" data-v="0">Вручную</button></div>';
+    if (state.markAuto) {
+      h += '<div class="muted" style="margin-top:6px">Осевая разметка рисуется сама на асфальте от 2 полос.</div>';
+    } else {
+      h += '<div class="grid" style="margin-top:8px">';
+      Object.keys(SIGNS).forEach(function (k) { h += '<button class="chip" data-act="sign" data-k="' + k + '">' + SIGNS[k][0] + ' ' + SIGNS[k][1] + '</button>'; });
+      h += '</div><div class="muted" style="margin-top:6px">Выберите знак и тапните по карте. Тап по знаку — удалить.</div>';
     }
-    $('hint').textContent = h;
+    var t = totals(), parts = [];
+    Object.keys(t.by).forEach(function (k) { parts.push(ROADS[k].n + ': ' + fmt(t.by[k].km, 2) + ' км · ' + fmt(t.by[k].cost, 1) + ' млн ₽'); });
+    h += '<h4>Итого</h4><div class="muted">' + (parts.join('<br>') || 'Пока ничего не проложено') + '</div>';
+    if (state.lines.length || state.signs.length) h += '<button class="btn danger" data-act="reset">Удалить всё построенное</button>';
+    return h;
   }
 
-  function updateStats() {
-    var t = totals();
-    $('len').textContent = fmt(t.len, 2) + ' км';
-    $('cost').textContent = t.cost > 0 && t.cost < 1
-      ? fmt(Math.round(t.cost * 1000), 0) + ' тыс. ₽'
-      : fmt(t.cost, t.cost < 100 ? 1 : 0) + ' млн ₽';
-    var parts = [];
-    Object.keys(TYPES).forEach(function (k) {
-      if (t.byType[k].km > 0) parts.push(TYPES[k].name + ': ' + fmt(t.byType[k].km, 2) + ' км · ' + fmt(t.byType[k].cost, 1) + ' млн ₽');
+  function vehHtml() {
+    var h = '<div class="muted">Парк техники. Стоимость парка: <b>' + fmt(fleetCost(), 1) + ' млн ₽</b> (цены ориентировочные)</div>';
+    Object.keys(VEH).forEach(function (k) {
+      var v = VEH[k], n = state.fleet[k] || 0, s = roleStat(v.r);
+      h += '<div class="row veh"><span>' + v.i + ' ' + v.n + '</span><span class="cnt"><button data-act="dec" data-k="' + k + '">−</button><b>' + n +
+           '</b><button data-act="inc" data-k="' + k + '">+</button></span></div>';
+      if (n) h += '<div class="muted">Нужен: ' + ROLES[v.r] + '</div>' + (s.bad ? '<div class="warn">⚠ не обучено: ' + s.bad + ' из ' + s.n + '</div>' : '');
     });
-    $('breakdown').innerHTML = parts.join('<br>');
+    return h;
   }
 
-  function updateButtons() {
-    var d = $('draw');
-    d.textContent = state.drawing ? 'Готово' : 'Проложить';
-    d.classList.toggle('on', state.drawing);
-    $('undo').disabled = !(state.cur.coords.length || state.lines.length);
-    $('reset').disabled = !(state.cur.coords.length || state.lines.length);
-    $('map').classList.toggle('drawing', state.drawing);
+  function staffHtml() {
+    if (!state.staff.length) return '<div class="muted">Добавьте технику во вкладке «Транспорт» — должности появятся сами.</div>';
+    var bad = state.staff.filter(function (p) { return p.bad; }).length;
+    var h = '<div class="muted">Нужно обучить или переоформить: <b>' + bad + '</b> из ' + state.staff.length + '</div>';
+    Object.keys(ROLES).forEach(function (r) {
+      var idx = [];
+      state.staff.forEach(function (p, i) { if (p.r === r) idx.push(i); });
+      if (!idx.length) return;
+      h += '<h4>' + ROLES[r] + ' — ' + idx.length + '</h4>';
+      idx.forEach(function (i, n) {
+        h += '<label class="row"><input type="checkbox" data-act="bad" data-i="' + i + '"' + (state.staff[i].bad ? ' checked' : '') + '> №' + (n + 1) + ' не обучен / права просрочены</label>';
+      });
+    });
+    return h;
   }
 
-  // ---------- Данные карты ----------
-  var map;
-  var ready = false;      // стиль загружен, слои добавлены
-  var loaded = false;     // карта полностью загрузилась (стиль + первые тайлы)
-  var usingFallback = false;
-  var firstFit = true;
+  function renderMenu() {
+    Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) { b.classList.toggle('on', b.dataset.k === state.tab); });
+    $('body').innerHTML = state.tab === 'roads' ? roadsHtml() : state.tab === 'veh' ? vehHtml() : staffHtml();
+  }
+  function renderHud() {
+    var t = totals();
+    $('hud').textContent = fmt(t.len, 2) + ' км · ' + fmt(t.cost, t.cost < 100 ? 1 : 0) + ' млн ₽';
+  }
+  function renderBar() {
+    var on = state.drawing || !!state.signMode;
+    $('bar').hidden = !on;
+    $('map').classList.toggle('drawing', on);
+    $('hint').textContent = state.drawing ? (state.cur.coords.length ? 'Тапайте, чтобы добавить точки' : 'Поставьте первую точку') : state.signMode ? 'Тапните, куда поставить знак' : '';
+    $('bUndo').disabled = state.signMode ? !state.signs.length : !(state.cur.coords.length || state.lines.length);
+  }
+
+  // ---------- Карта: данные ----------
+  var map, ready = false, loaded = false, usingFallback = false, firstFit = true, signMarkers = [];
 
   function lineFeatures() {
     var f = [];
     allLines().forEach(function (l) {
-      if (l.coords.length >= 2) f.push({ type: 'Feature', properties: { kind: l.type }, geometry: { type: 'LineString', coordinates: l.coords } });
+      if (l.coords.length < 2) return;
+      var r = ROADS[l.kind], ln = r.lane ? l.lanes : 1;
+      f.push({ type: 'Feature', properties: { w: r.w * ln, c: r.c, b: r.b, lanes: ln, rail: !!r.rail, mark: !!(state.markAuto && r.lane && ln >= 2) },
+               geometry: { type: 'LineString', coordinates: l.coords } });
     });
     return { type: 'FeatureCollection', features: f };
   }
   function pointFeatures() {
     var f = [];
     state.lines.forEach(function (l) {
-      l.coords.forEach(function (c, i) {
-        var end = i === 0 || i === l.coords.length - 1;
-        f.push({ type: 'Feature', properties: { end: end, active: false }, geometry: { type: 'Point', coordinates: c } });
-      });
+      [l.coords[0], l.coords[l.coords.length - 1]].forEach(function (c) { f.push({ type: 'Feature', properties: { active: false }, geometry: { type: 'Point', coordinates: c } }); });
     });
-    state.cur.coords.forEach(function (c) {
-      f.push({ type: 'Feature', properties: { end: true, active: true }, geometry: { type: 'Point', coordinates: c } });
-    });
+    state.cur.coords.forEach(function (c) { f.push({ type: 'Feature', properties: { active: true }, geometry: { type: 'Point', coordinates: c } }); });
     return { type: 'FeatureCollection', features: f };
   }
   function previewFeature() {
     var c = state.cur.coords, f = [];
-    if (state.drawing && state.cursor && c.length) {
-      f.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [c[c.length - 1], state.cursor] } });
-    }
+    if (state.drawing && state.cursor && c.length) f.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [c[c.length - 1], state.cursor] } });
     return { type: 'FeatureCollection', features: f };
   }
-
   function render() {
     if (!ready) return;
     var a = map.getSource('fg-lines'), b = map.getSource('fg-points'), c = map.getSource('fg-preview');
     if (!a || !b || !c) return;
-    a.setData(lineFeatures());
-    b.setData(pointFeatures());
-    c.setData(previewFeature());
+    a.setData(lineFeatures()); b.setData(pointFeatures()); c.setData(previewFeature());
+  }
+  function renderSigns() {
+    if (!ready) return;
+    signMarkers.forEach(function (m) { m.remove(); });
+    signMarkers = state.signs.map(function (s, i) {
+      var el = document.createElement('div');
+      el.className = 'sign'; el.textContent = SIGNS[s.k][0]; el.title = SIGNS[s.k][1];
+      el.onclick = function (ev) { ev.stopPropagation(); state.signs.splice(i, 1); upd(); };
+      return new maplibregl.Marker({ element: el }).setLngLat(s.c).addTo(map);
+    });
   }
 
   function addLayers() {
     ['fg-lines', 'fg-points', 'fg-preview'].forEach(function (id) {
       if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     });
-    if (map.getLayer('fg-points')) return; // слои уже добавлены
-    var widthExpr = function (a, b, c) { return ['interpolate', ['linear'], ['zoom'], 8, a, 14, b, 18, c]; };
-    var isK = function (k) { return ['==', ['get', 'kind'], k]; };
-
-    // Автодорога
-    map.addLayer({ id: 'fg-road-casing', type: 'line', source: 'fg-lines', filter: isK('road'),
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': TYPES.road.casing, 'line-width': widthExpr(4, 9, 22) } });
-    map.addLayer({ id: 'fg-road', type: 'line', source: 'fg-lines', filter: isK('road'),
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': TYPES.road.color, 'line-width': widthExpr(2.5, 6, 18) } });
-    map.addLayer({ id: 'fg-road-center', type: 'line', source: 'fg-lines', filter: isK('road'),
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: { 'line-color': '#ffffff', 'line-width': widthExpr(0.5, 1, 2), 'line-dasharray': [3, 3] } });
-
-    // Трамвай
-    map.addLayer({ id: 'fg-tram-casing', type: 'line', source: 'fg-lines', filter: isK('tram'),
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': TYPES.tram.casing, 'line-width': widthExpr(4, 6.5, 12) } });
-    map.addLayer({ id: 'fg-tram', type: 'line', source: 'fg-lines', filter: isK('tram'),
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': TYPES.tram.color, 'line-width': widthExpr(2, 3.5, 7) } });
-
-    // ЖД
-    map.addLayer({ id: 'fg-rail-base', type: 'line', source: 'fg-lines', filter: isK('rail'),
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: { 'line-color': TYPES.rail.color, 'line-width': widthExpr(3, 5, 9) } });
-    map.addLayer({ id: 'fg-rail-dash', type: 'line', source: 'fg-lines', filter: isK('rail'),
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: { 'line-color': '#ffffff', 'line-width': widthExpr(1.5, 2.5, 5), 'line-dasharray': [2, 2] } });
-
-    // Предпросмотр сегмента до курсора
-    map.addLayer({ id: 'fg-preview', type: 'line', source: 'fg-preview',
-      paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [2, 2] } });
-
-    // Вершины
+    if (map.getLayer('fg-points')) return;
+    // ширина = множитель w (полосы × ширина типа) × пикселей на зуме, плюс add для обводки
+    var Z = function (a, b, c, add) {
+      var s = function (m) { return ['+', ['*', ['get', 'w'], m], add]; };
+      return ['interpolate', ['linear'], ['zoom'], 8, s(a), 14, s(b), 18, s(c)];
+    };
+    var rnd = { 'line-cap': 'round', 'line-join': 'round' }, butt = { 'line-cap': 'butt', 'line-join': 'round' };
+    map.addLayer({ id: 'fg-casing', type: 'line', source: 'fg-lines', layout: rnd, paint: { 'line-color': ['get', 'b'], 'line-width': Z(1, 3, 9, 2.5) } });
+    map.addLayer({ id: 'fg-main', type: 'line', source: 'fg-lines', layout: rnd, paint: { 'line-color': ['get', 'c'], 'line-width': Z(1, 3, 9, 0) } });
+    map.addLayer({ id: 'fg-rail', type: 'line', source: 'fg-lines', filter: ['==', ['get', 'rail'], true], layout: butt,
+      paint: { 'line-color': '#ffffff', 'line-width': Z(0.4, 0.8, 2, 0), 'line-dasharray': [2, 2] } });
+    map.addLayer({ id: 'fg-mark', type: 'line', source: 'fg-lines', filter: ['==', ['get', 'mark'], true], layout: butt,
+      paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 14, 1, 18, 2], 'line-dasharray': [3, 3] } });
+    map.addLayer({ id: 'fg-preview', type: 'line', source: 'fg-preview', paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [2, 2] } });
     map.addLayer({ id: 'fg-points', type: 'circle', source: 'fg-points',
-      paint: {
-        'circle-radius': ['case', ['get', 'active'], 6, ['get', 'end'], 4, 2.5],
-        'circle-color': ['case', ['get', 'active'], '#2563eb', '#ffffff'],
-        'circle-stroke-color': '#1d2530',
-        'circle-stroke-width': 1.5
-      } });
+      paint: { 'circle-radius': ['case', ['get', 'active'], 6, 4], 'circle-color': ['case', ['get', 'active'], '#2563eb', '#ffffff'],
+               'circle-stroke-color': '#1d2530', 'circle-stroke-width': 1.5 } });
   }
 
   // ---------- Действия ----------
   function commitCurrent() {
-    if (state.cur.coords.length >= 2) state.lines.push({ type: state.cur.type, coords: state.cur.coords.slice() });
-    state.cur = { type: state.type, coords: [] };
+    if (state.cur.coords.length >= 2) state.lines.push({ kind: state.cur.kind, lanes: state.cur.lanes, coords: state.cur.coords.slice() });
+    state.cur = { kind: state.kind, lanes: state.lanes, coords: [] };
   }
-
-  function toggleDrawing() {
-    if (state.drawing) {
-      commitCurrent();
-      state.drawing = false;
-      state.cursor = null;
-    } else {
-      state.drawing = true;
-      state.cur = { type: state.type, coords: [] };
-    }
-    refresh();
-  }
-
+  function exitModes() { if (state.drawing) commitCurrent(); state.drawing = false; state.signMode = null; state.cursor = null; }
   function undo() {
-    if (state.cur.coords.length) {
-      state.cur.coords.pop();
-    } else if (state.lines.length) {
-      var last = state.lines.pop();
-      // возвращаем линию в редактирование, чтобы убирать точки по одной
-      if (state.drawing) { state.cur = { type: last.type, coords: last.coords.slice(0, -1) }; state.type = last.type; buildTypeButtons(); }
+    if (state.signMode) state.signs.pop();
+    else if (state.cur.coords.length) state.cur.coords.pop();
+    else if (state.lines.length) {
+      var l = state.lines.pop();
+      if (state.drawing) state.cur = { kind: l.kind, lanes: l.lanes, coords: l.coords.slice(0, -1) };
     }
-    refresh();
-  }
-
-  function resetAll() {
-    if ((state.lines.length || state.cur.coords.length) && !confirm('Удалить все построенные объекты?')) return;
-    state.lines = [];
-    state.cur = { type: state.type, coords: [] };
-    state.drawing = false;
-    state.cursor = null;
-    refresh();
+    upd();
   }
 
   function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.lines.concat(state.cur.coords.length >= 2 ? [state.cur] : []))); } catch (e) {}
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        lines: state.lines.concat(state.cur.coords.length >= 2 ? [state.cur] : []),
+        signs: state.signs, fleet: state.fleet, staff: state.staff, markAuto: state.markAuto
+      }));
+    } catch (e) {}
   }
   function load() {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      var arr = JSON.parse(raw);
-      if (Array.isArray(arr)) {
-        state.lines = arr.filter(function (l) { return l && TYPES[l.type] && Array.isArray(l.coords) && l.coords.length >= 2; });
-      }
+      var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+      if (!d) return;
+      state.lines = (d.lines || []).filter(function (l) { return l && ROADS[l.kind] && Array.isArray(l.coords) && l.coords.length >= 2; })
+        .map(function (l) { return { kind: l.kind, lanes: Math.max(1, Math.min(8, +l.lanes || 1)), coords: l.coords }; });
+      state.signs = (d.signs || []).filter(function (s) { return s && SIGNS[s.k] && Array.isArray(s.c); });
+      Object.keys(VEH).forEach(function (k) { state.fleet[k] = Math.max(0, Math.min(99, +(d.fleet || {})[k] || 0)); });
+      state.staff = (d.staff || []).filter(function (p) { return p && ROLES[p.r]; }).map(function (p) { return { r: p.r, bad: !!p.bad }; });
+      state.markAuto = d.markAuto !== false;
+      syncStaff();
     } catch (e) {}
   }
 
-  function refresh() {
-    render();
-    updateStats();
-    updateButtons();
-    updateHint();
+  function upd() {
+    render(); renderSigns(); renderHud(); renderBar();
+    if (!$('menu').hidden) renderMenu();
     save();
   }
+
+  // ---------- События интерфейса ----------
+  $('pen').onclick = function () { exitModes(); $('menu').hidden = !$('menu').hidden; upd(); };
+  $('bDone').onclick = function () { exitModes(); upd(); };
+  $('bUndo').onclick = undo;
+  $('menu').onclick = function (e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var a = t.dataset.act, k = t.dataset.k;
+    if (a === 'tab') state.tab = k;
+    else if (a === 'kind') state.kind = k;
+    else if (a === 'draw') { state.drawing = true; state.signMode = null; state.cur = { kind: state.kind, lanes: state.lanes, coords: [] }; $('menu').hidden = true; }
+    else if (a === 'mark') state.markAuto = t.dataset.v === '1';
+    else if (a === 'sign') { state.signMode = k; state.drawing = false; $('menu').hidden = true; }
+    else if (a === 'inc' || a === 'dec') { state.fleet[k] = Math.max(0, Math.min(99, (state.fleet[k] || 0) + (a === 'inc' ? 1 : -1))); syncStaff(); }
+    else if (a === 'reset') { if (confirm('Удалить все дороги и знаки?')) { state.lines = []; state.signs = []; state.cur = { kind: state.kind, lanes: state.lanes, coords: [] }; } }
+    else return;
+    upd();
+  };
+  $('menu').onchange = function (e) {
+    var t = e.target;
+    if (t.id === 'lanes') state.lanes = Math.max(1, Math.min(8, parseInt(t.value, 10) || 1));
+    else if (t.dataset.act === 'bad') state.staff[+t.dataset.i].bad = t.checked;
+    else return;
+    upd();
+  };
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { exitModes(); upd(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+  });
 
   // ---------- Запасные варианты ----------
-  // Переход на Яндекс Карты. Возвращает true, если переход начался.
   function goYandex(reason) {
     if (!YANDEX_FALLBACK) return false;
-    console.warn('FreeGIS: основная карта недоступна, открываю Яндекс Карты —', reason);
-    save();
-    location.replace(YANDEX_URL);
+    console.warn('FreeGIS: открываю Яндекс Карты —', reason);
+    save(); location.replace(YANDEX_URL);
     return true;
   }
-
   function switchToFallback(reason) {
     if (usingFallback || !map) return;
     usingFallback = true;
-    console.warn('FreeGIS: переключаюсь на запасную подложку —', reason);
+    console.warn('FreeGIS: запасная подложка —', reason);
     setStatus('Основной стиль карты недоступен, включена запасная подложка OSM.');
     try { map.setStyle(FALLBACK_STYLE); } catch (e) { setStatus('Не удалось загрузить карту: ' + (e && e.message || e)); }
   }
@@ -397,31 +388,19 @@
   // ---------- Карта ----------
   function initMap() {
     try {
-      map = new maplibregl.Map({
-        container: 'map',
-        style: STYLE_URL,
-        center: [37.62, 55.75],
-        zoom: 10,
-        maxZoom: 19,
-        attributionControl: { compact: true }
-      });
+      map = new maplibregl.Map({ container: 'map', style: STYLE_URL, center: [37.62, 55.75], zoom: 10, maxZoom: 19, attributionControl: { compact: true } });
     } catch (e) {
-      // чаще всего — отключён WebGL / аппаратное ускорение; Яндекс Карты работают и без него
-      if (goYandex('MapLibre не запустился: ' + (e && e.message || e))) return;
+      if (goYandex('MapLibre не запустился')) return;
       setStatus('Карта не запустилась: ' + (e && e.message || e) + '. Проверьте, включён ли WebGL в браузере.');
       return;
     }
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
 
-    // style.load срабатывает и после смены стиля — слои добавляются заново
     map.on('style.load', function () {
-      addLayers();
-      ready = true;
-      refresh();
+      addLayers(); ready = true; upd();
       if (firstFit) {
         firstFit = false;
-        // подогнать вид под сохранённые объекты
         var pts = [];
         state.lines.forEach(function (l) { pts = pts.concat(l.coords); });
         if (pts.length) {
@@ -431,69 +410,41 @@
         }
       }
     });
-
-    // 'load' — стиль и первые тайлы реально пришли
     map.on('load', function () { loaded = true; });
-
-    if (YANDEX_FALLBACK) {
-      // не загрузилась за FALLBACK_MS — уходим на Яндекс Карты
-      setTimeout(function () { if (!loaded) goYandex('таймаут ' + FALLBACK_MS + ' мс'); }, FALLBACK_MS);
-    } else {
-      // если стиль не загрузился за 8 секунд — запасная подложка OSM
-      setTimeout(function () { if (!ready) switchToFallback('таймаут загрузки стиля'); }, 8000);
-    }
+    if (YANDEX_FALLBACK) setTimeout(function () { if (!loaded) goYandex('таймаут ' + FALLBACK_MS + ' мс'); }, FALLBACK_MS);
+    else setTimeout(function () { if (!ready) switchToFallback('таймаут загрузки стиля'); }, 8000);
 
     map.on('click', function (e) {
-      if (!state.drawing) return;
-      state.cur.type = state.type;
-      state.cur.coords.push([e.lngLat.lng, e.lngLat.lat]);
-      refresh();
+      var p = [e.lngLat.lng, e.lngLat.lat];
+      if (state.drawing) { state.cur.coords.push(p); upd(); }
+      else if (state.signMode) { state.signs.push({ k: state.signMode, c: p }); upd(); }
     });
     map.on('mousemove', function (e) {
       if (!state.drawing || !state.cur.coords.length) return;
-      state.cursor = [e.lngLat.lng, e.lngLat.lat];
-      render();
+      state.cursor = [e.lngLat.lng, e.lngLat.lat]; render();
     });
-    map.on('dblclick', function (e) {
-      if (state.drawing) e.preventDefault();
-    });
+    map.on('dblclick', function (e) { if (state.drawing || state.signMode) e.preventDefault(); });
     map.on('error', function (e) {
       var msg = e && e.error && (e.error.message || String(e.error)) || 'unknown';
       console.warn('map error:', msg);
-      // ошибка самого стиля (до его загрузки) — запасная подложка OSM.
-      // При включённом переходе на Яндекс решает таймер выше.
       if (!ready && !YANDEX_FALLBACK) switchToFallback(msg);
     });
   }
 
-  // ---------- Загрузка MapLibre с запасным CDN ----------
   function loadScript(urls, done) {
     var i = 0;
     (function next() {
       if (i >= urls.length) return done(false);
       var s = document.createElement('script');
-      s.src = urls[i++];
-      s.onload = function () { done(true); };
+      s.src = urls[i++]; s.onload = function () { done(true); };
       s.onerror = function () { s.remove(); next(); };
       document.head.appendChild(s);
     })();
   }
 
   // ---------- Старт ----------
-  $('draw').onclick = toggleDrawing;
-  $('undo').onclick = undo;
-  $('reset').onclick = resetAll;
-  window.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && state.drawing) toggleDrawing();
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
-  });
-
   load();
-  buildTypeButtons();
-  updateStats();
-  updateButtons();
-  updateHint();
-
+  renderHud(); renderBar();
   if (window.maplibregl) initMap();
   else loadScript(JS_URLS, function (ok) {
     if (ok && window.maplibregl) initMap();
