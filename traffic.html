@@ -6,9 +6,9 @@
 <title>FreeGIS — Пробки и симуляция (Яндекс Карты)</title>
 <style>
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  [hidden] { display:none !important; }
   html,body { margin:0; height:100%; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:#1d2530; background:#e8ecf1; }
   #map { position:fixed; left:0; right:0; top:0; bottom:0; }
+  #cv { position:fixed; left:0; top:0; z-index:3; pointer-events:none; }
   #p { position:fixed; z-index:5; left:0; right:0; bottom:0; background:#fff; border-radius:16px 16px 0 0; box-shadow:0 -4px 20px rgba(0,0,0,.2);
        padding:12px 14px calc(12px + env(safe-area-inset-bottom)); display:grid; gap:8px; }
   @media (min-width:700px) { #p { left:12px; right:auto; bottom:auto; top:12px; width:370px; border-radius:14px; } }
@@ -18,23 +18,20 @@
   button:disabled { opacity:.45; }
   #info { font-size:13px; min-height:18px; line-height:1.35; }
   #info.err { color:#dc2626; }
-  #dem { font-size:13px; display:grid; gap:4px; }
-  #dem input { width:100%; }
   #stat, #tl { font-size:12px; color:#6b7686; line-height:1.45; }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<canvas id="cv"></canvas>
 <div id="p">
   <div id="row">
-    <button id="bTraf">🚥 Пробки Яндекса</button>
-    <button id="bLights">🚦 Светофоры</button>
-    <button id="bSel">📍 Выбрать участок</button>
+    <button id="bTraf">🚥 Пробки</button>
+    <button id="bPts">📍 Точки</button>
     <button id="bSim" disabled>▶ Симуляция</button>
+    <button id="bClr">✕ Сброс</button>
   </div>
   <div id="info"></div>
-  <label id="dem" hidden>Поток: <b id="dv">800</b> авт/ч на полосу
-    <input id="d" type="range" min="200" max="1800" step="100" value="800"></label>
   <div id="tl"></div>
   <div id="stat"></div>
 </div>
@@ -46,53 +43,43 @@
   // API-ключ Яндекс Карт. Ограничьте его по HTTP Referer: kpblm4ik.github.io
   var YA_KEY = '2644b49a-89da-4aca-bdfe-2ceb5071a9b6';
 
-  // Дороги берутся из основной карты (то же сохранение freegis.v2): [цвет, обводка, ширина-множитель]
-  var COL = { asphalt: ['#6b7280', '#374151', 1], gravel: ['#cbd5e1', '#64748b', 1.4], dirt: ['#a16207', '#fde68a', 1.2],
-              rail1520: ['#3a3f47', '#ffffff', 1.6], rail750: ['#e53935', '#ffffff', 1] };
-  var ROAD_OK = { asphalt: 1, gravel: 1, dirt: 1 };      // симуляция и точки — только на автодорогах
-  var VMAX = { asphalt: 3, gravel: 2, dirt: 1 };         // клеток/с (1 клетка = 7,5 м): 81 / 54 / 27 км/ч
-  var CELL = 7.5, BIN = 75, MAX_LEN = 5000, SNAP_PX = 25, LIGHT_M = 20, CYCLE = 60, GREEN = 30;
-
+  var HW = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link';
+  var OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+  // Типы транспорта: len — длина (м), v/dv — желаемая скорость и разброс (м/с), a — ускорение, r — размер точки
+  var TYPES = {
+    car:   { len: 4.5, v: 14,   dv: 2.5, a: 1.5, col: '#1d4ed8', r: 2.5 },
+    truck: { len: 9,   v: 11,   dv: 1.5, a: 0.8, col: '#ea580c', r: 3.6 },
+    bus:   { len: 12,  v: 10.5, dv: 1,   a: 0.9, col: '#16a34a', r: 4.2 }
+  };
+  var LANES = 2, MAXLEN = 6000, SNAP_PX = 30, LIGHT_M = 18, BIN = 75, DT = 0.25, SPEED = 6, CYC = 60, GRN = 30;
   var $ = function (id) { return document.getElementById(id); };
+  var rnd = function (a, b) { return a + Math.floor(Math.random() * (b - a + 1)); };
   var toYa = function (c) { return [c[1], c[0]]; };
-  var map, lines = [];
+  var map, pr, G = null, userLines = [];
 
   try {
     var d0 = JSON.parse(localStorage.getItem('freegis.v2') || 'null');
-    lines = ((d0 && d0.lines) || []).filter(function (l) { return l && COL[l.kind] && Array.isArray(l.coords) && l.coords.length >= 2; });
+    userLines = ((d0 && d0.lines) || []).filter(function (l) { return l && /^(asphalt|gravel|dirt)$/.test(l.kind) && Array.isArray(l.coords) && l.coords.length >= 2; });
   } catch (e) {}
 
   function info(m, err) { $('info').textContent = m || ''; $('info').className = err ? 'err' : ''; }
 
-  // ---------- Геометрия (метры, локальная плоскость) ----------
+  // ---------- Геометрия (метры) ----------
   function dist(A, B) {
     var la = (A[1] + B[1]) / 2 * Math.PI / 180;
     return Math.hypot((B[0] - A[0]) * 111320 * Math.cos(la), (B[1] - A[1]) * 110574);
   }
   function xy(c, o) { return [(c[0] - o[0]) * 111320 * Math.cos(o[1] * Math.PI / 180), (c[1] - o[1]) * 110574]; }
-  // ближайшая точка ломаной c к точке p: d — расстояние (м), s — расстояние вдоль линии (м), c — точка на линии
   function nearest(c, p) {
     var best = null, s = 0;
     for (var i = 1; i < c.length; i++) {
       var A = c[i - 1], B = c[i], a = xy(A, p), b = xy(B, p), dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
-      var t = L2 ? Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / L2)) : 0, len = dist(A, B);
-      var d = Math.hypot(a[0] + t * dx, a[1] + t * dy);
-      if (!best || d < best.d) best = { d: d, s: s + t * len, c: [A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1])] };
+      var t = L2 ? Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / L2)) : 0, len = dist(A, B), d = Math.hypot(a[0] + t * dx, a[1] + t * dy);
+      if (!best || d < best.d) best = { d: d, s: s + t * len };
       s += len;
     }
     return best;
   }
-  // точка p должна лежать на нарисованной автодороге (допуск SNAP_PX пикселей экрана), иначе null
-  function snap(p) {
-    var th = SNAP_PX * 156543.03 * Math.cos(p[1] * Math.PI / 180) / Math.pow(2, map.getZoom()), best = null;
-    lines.forEach(function (l, li) {
-      if (!ROAD_OK[l.kind]) return;
-      var r = nearest(l.coords, p);
-      if (r.d <= th && (!best || r.d < best.d)) best = { li: li, d: r.d, s: r.s, c: r.c };
-    });
-    return best;
-  }
-  // часть ломаной от sa до sb метров
   function sub(c, sa, sb) {
     var out = [], s = 0;
     for (var i = 1; i < c.length; i++) {
@@ -108,188 +95,324 @@
   }
   function pathLen(c) { var s = 0; for (var i = 1; i < c.length; i++) s += dist(c[i - 1], c[i]); return s; }
 
-  // ---------- Карта и дороги ----------
+  // ---------- Дороги и светофоры из OpenStreetMap ----------
+  function kf(c) { return c[0].toFixed(6) + ',' + c[1].toFixed(6); }
+  function addWay(g, coords) {
+    for (var i = 1; i < coords.length; i++) {
+      var A = coords[i - 1], B = coords[i], a = kf(A), b = kf(B);
+      if (a === b) continue;
+      g.nodes[a] = A; g.nodes[b] = B;
+      var w = dist(A, B);
+      (g.adj[a] = g.adj[a] || []).push([b, w]); (g.adj[b] = g.adj[b] || []).push([a, w]);
+      g.segs.push([a, b]);
+    }
+  }
+  function fetchOsm(q, i, cb) {
+    if (i >= OVERPASS.length) return cb(null);
+    fetch(OVERPASS[i] + '?data=' + encodeURIComponent(q))
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(cb)
+      .catch(function () { fetchOsm(q, i + 1, cb); });
+  }
+  function loadGraph(b, cb) {
+    var bb = [b[0][0], b[0][1], b[1][0], b[1][1]].join(',');
+    var q = '[out:json][timeout:25];(way["highway"~"^(' + HW + ')$"](' + bb + ');node["highway"="traffic_signals"](' + bb + '););out body geom;';
+    fetchOsm(q, 0, function (j) {
+      if (!j) return cb(false);
+      var g = { nodes: {}, adj: {}, segs: [], lights: [] };
+      (j.elements || []).forEach(function (x) {
+        if (x.type === 'way' && x.geometry) addWay(g, x.geometry.map(function (p) { return [p.lon, p.lat]; }));
+        else if (x.type === 'node') g.lights.push([x.lon, x.lat]);
+      });
+      userLines.forEach(function (l) { addWay(g, l.coords); });
+      G = g; redraw(); cb(true);
+    });
+  }
+
+  // ---------- Привязка к дороге и маршрут ----------
+  // точка должна лежать на дороге (допуск SNAP_PX пикселей экрана), иначе null: лес, дома и т.п. не проходят
+  function snap(p) {
+    var th = SNAP_PX * 156543.03 * Math.cos(p[1] * Math.PI / 180) / Math.pow(2, map.getZoom()), best = null;
+    G.segs.forEach(function (sg, i) {
+      var A = G.nodes[sg[0]], B = G.nodes[sg[1]], a = xy(A, p), b = xy(B, p), dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+      var t = L2 ? Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / L2)) : 0, d = Math.hypot(a[0] + t * dx, a[1] + t * dy);
+      if (d <= th && (!best || d < best.d)) best = { i: i, d: d, c: [A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1])] };
+    });
+    return best;
+  }
+  function Heap() {
+    var a = [];
+    return {
+      size: function () { return a.length; },
+      push: function (x) {
+        a.push(x); var i = a.length - 1;
+        while (i > 0) { var p = (i - 1) >> 1; if (a[p][0] <= a[i][0]) break; var t = a[p]; a[p] = a[i]; a[i] = t; i = p; }
+      },
+      pop: function () {
+        var top = a[0], last = a.pop();
+        if (a.length) {
+          a[0] = last; var i = 0;
+          for (;;) {
+            var l = 2 * i + 1, r = l + 1, m = i;
+            if (l < a.length && a[l][0] < a[m][0]) m = l;
+            if (r < a.length && a[r][0] < a[m][0]) m = r;
+            if (m === i) break;
+            var t = a[m]; a[m] = a[i]; a[i] = t; i = m;
+          }
+        }
+        return top;
+      }
+    };
+  }
+  // кратчайший путь по дорогам между двумя привязанными точками (Дейкстра)
+  function route(S, E) {
+    if (S.i === E.i) return [S.c, E.c];
+    var sa = G.segs[S.i], ea = G.segs[E.i], dd = {}, pv = {}, fin = {}, hp = Heap(), tgt = {}, best = Infinity, bk = null;
+    sa.forEach(function (k) { var w = dist(S.c, G.nodes[k]); dd[k] = w; pv[k] = null; hp.push([w, k]); });
+    ea.forEach(function (k) { tgt[k] = dist(E.c, G.nodes[k]); });
+    while (hp.size()) {
+      var x = hp.pop(), du = x[0], u = x[1];
+      if (fin[u]) continue;
+      if (du > best) break;
+      fin[u] = 1;
+      if (tgt[u] !== undefined && du + tgt[u] < best) { best = du + tgt[u]; bk = u; }
+      (G.adj[u] || []).forEach(function (e) {
+        var nd = du + e[1];
+        if (dd[e[0]] === undefined || nd < dd[e[0]]) { dd[e[0]] = nd; pv[e[0]] = u; hp.push([nd, e[0]]); }
+      });
+    }
+    if (bk === null) return null;
+    var ks = []; for (var k = bk; k !== null; k = pv[k]) ks.push(k);
+    ks.reverse();
+    return [S.c].concat(ks.map(function (k2) { return G.nodes[k2]; }), [E.c]);
+  }
+  function buildPath(pts) {
+    var path = [];
+    for (var i = 1; i < pts.length; i++) {
+      var r = route(pts[i - 1], pts[i]);
+      if (!r) return null;
+      path = path.concat(path.length ? r.slice(1) : r);
+    }
+    return path;
+  }
+
+  // ---------- Карта ----------
+  var cv = $('cv'), ctx = cv.getContext('2d'), W = 0, H = 0;
+  function layout() {
+    var bottom = window.innerWidth < 700 ? $('p').offsetHeight : 0, dpr = window.devicePixelRatio || 1;
+    $('map').style.bottom = bottom + 'px';
+    W = window.innerWidth; H = window.innerHeight - bottom;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (map) { map.container.fitToViewport(); redraw(); }
+  }
+  function proj(c) {
+    var g = pr.toGlobalPixels([c[1], c[0]], map.getZoom()), m = map.getGlobalPixelCenter();
+    return [g[0] - m[0] + W / 2, g[1] - m[1] + H / 2];
+  }
   function pl(c, color, w, extra) {
     var o = { strokeColor: color, strokeWidth: w, strokeOpacity: 1, interactivityModel: 'default#transparent' };
     for (var k in extra) o[k] = extra[k];
     return new ymaps.Polyline(c.map(toYa), {}, o);
   }
-  function drawRoads() {
-    lines.forEach(function (l) {
-      var k = COL[l.kind], w = k[2] * (l.kind === 'asphalt' ? l.lanes : 1) * 3 + 2;
-      map.geoObjects.add(pl(l.coords, k[1], w + 3));
-      map.geoObjects.add(pl(l.coords, k[0], w));
-    });
-    if (lines.length) {
-      var la = [], lo = [];
-      lines.forEach(function (l) { l.coords.forEach(function (c) { lo.push(c[0]); la.push(c[1]); }); });
-      map.setBounds([[Math.min.apply(null, la), Math.min.apply(null, lo)], [Math.max.apply(null, la), Math.max.apply(null, lo)]], { checkZoomRange: true, zoomMargin: 60 });
-    } else info('Дорог нет: сначала проложите их на основной карте.', true);
-  }
-  function layout() {
-    $('map').style.bottom = (window.innerWidth < 700 ? $('p').offsetHeight : 0) + 'px';
-    if (map) map.container.fitToViewport();
-  }
 
   // ---------- Пробки Яндекса в реальном времени ----------
   var tp = null, tOn = false;
-  $('bTraf').onclick = function () {
+  function setTraffic(on) {
     if (!tp) {
       try {
         tp = new ymaps.traffic.provider.Actual({}, { infoLayerShown: true });
         tp.state.events.add('change', function () {
           var l = tp.state.get('level');
-          $('tl').textContent = typeof l === 'number' ? 'Пробки сейчас: ' + l + ' из 10 баллов' : '';
+          $('tl').textContent = tOn && typeof l === 'number' ? 'Пробки сейчас: ' + l + ' из 10 баллов (слой обновляется сам)' : '';
         });
       } catch (e) { info('Слой пробок недоступен: ' + (e && e.message || e), true); return; }
     }
-    tOn = !tOn;
-    tp.setMap(tOn ? map : null);
-    this.classList.toggle('on', tOn);
-    if (!tOn) $('tl').textContent = '';
-  };
-
-  // ---------- Светофоры (OpenStreetMap, highway=traffic_signals) ----------
-  var lights = [], lightObjs = [];
-  function loadLights(s, w, n, e, done) {
-    var q = '[out:json][timeout:15];node["highway"="traffic_signals"](' + [s, w, n, e].join(',') + ');out;';
-    fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q))
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function (j) {
-        lightObjs.forEach(function (o) { map.geoObjects.remove(o); });
-        lightObjs = [];
-        lights = (j.elements || []).map(function (x) { return [x.lon, x.lat]; });
-        lights.forEach(function (c) {
-          var o = new ymaps.Placemark(toYa(c), { hintContent: 'Светофор' }, { preset: 'islands#circleIcon', iconColor: '#ffffff', interactivityModel: 'default#transparent' });
-          o.properties.set('iconContent', '🚦');
-          map.geoObjects.add(o); lightObjs.push(o);
-        });
-        done(true);
-      })
-      .catch(function () { done(false); });
+    tOn = on; tp.setMap(on ? map : null);
+    $('bTraf').classList.toggle('on', on);
+    if (!on) $('tl').textContent = '';
   }
-  $('bLights').onclick = function () {
-    if (map.getZoom() < 14) { info('Приблизьте карту (масштаб от 14), чтобы загрузить светофоры.', true); return; }
-    var b = map.getBounds();
-    info('Загружаю светофоры…');
-    loadLights(b[0][0], b[0][1], b[1][0], b[1][1], function (ok) {
-      info(ok ? 'Светофоров в кадре: ' + lights.length : 'Не удалось загрузить светофоры (сервис OpenStreetMap недоступен).', !ok);
+  $('bTraf').onclick = function () { setTraffic(!tOn); };
+
+  // ---------- Выбор точек ----------
+  var selecting = false, pts = [], path = null, selObjs = [];
+  function clearSel() {
+    stopSim(true);
+    selObjs.forEach(function (o) { map.geoObjects.remove(o); }); selObjs = [];
+    pts = []; path = null; $('bSim').disabled = true; $('stat').textContent = '';
+  }
+  function showSel() {
+    selObjs.forEach(function (o) { map.geoObjects.remove(o); }); selObjs = [];
+    if (path && path.length > 1) { var o = pl(path, '#2563eb', 12, { strokeOpacity: 0.4 }); map.geoObjects.add(o); selObjs.push(o); }
+    pts.forEach(function (p, i) {
+      var m = new ymaps.Placemark(toYa(p.c), { iconContent: String(i + 1) }, { preset: 'islands#blueCircleIcon', interactivityModel: 'default#transparent' });
+      map.geoObjects.add(m); selObjs.push(m);
     });
-  };
-
-  // ---------- Выбор участка (точки только на дороге) ----------
-  var selecting = false, A = null, sec = null, secObjs = [];
-  function clearSec() {
-    secObjs.forEach(function (o) { map.geoObjects.remove(o); });
-    secObjs = []; A = null; sec = null; stopSim(); $('bSim').disabled = true; $('dem').hidden = true; $('stat').textContent = '';
+    $('bSim').disabled = !path;
   }
-  function addSec(o) { map.geoObjects.add(o); secObjs.push(o); return o; }
-  function dot(c, color) { return addSec(new ymaps.Placemark(toYa(c), {}, { preset: 'islands#circleDotIcon', iconColor: color, interactivityModel: 'default#transparent' })); }
+  function endSelect() { selecting = false; $('bPts').classList.remove('on'); $('bPts').textContent = '📍 Точки'; }
 
-  $('bSel').onclick = function () {
-    selecting = !selecting;
-    this.classList.toggle('on', selecting);
-    if (selecting) { clearSec(); info('Тапните первую точку на дороге.'); } else info('');
+  $('bPts').onclick = function () {
+    if (selecting) { endSelect(); info(path ? 'Участок ' + Math.round(pathLen(path)) + ' м. Нажмите «Симуляция».' : ''); return; }
+    if (map.getZoom() < 15) { info('Приблизьте карту (масштаб от 15) и повторите: дороги загружаются для видимой области.', true); return; }
+    clearSel(); info('Загружаю дороги и светофоры…');
+    var b = map.getBounds();
+    loadGraph(b, function (ok) {
+      if (!ok) { info('Не удалось загрузить дороги (сервис OpenStreetMap недоступен).', true); return; }
+      selecting = true; $('bPts').classList.add('on'); $('bPts').textContent = '✔ Готово';
+      info('Тапайте точки на дороге (две и больше). Светофоров в кадре: ' + G.lights.length);
+    });
   };
 
   function pick(p) {
     var r = snap(p);
-    if (!r) { info('Точка вне дороги. Точки можно ставить только на нарисованной автодороге.', true); return; }
-    if (!A) { A = r; dot(r.c, '#2563eb'); info('Теперь вторая точка на той же дороге.'); return; }
-    if (r.li !== A.li) { info('Обе точки должны быть на одной дороге.', true); return; }
-    if (Math.abs(r.s - A.s) < 30) { info('Точки слишком близко: нужно хотя бы 30 м.', true); return; }
-    if (Math.abs(r.s - A.s) > MAX_LEN) { info('Участок длиннее ' + MAX_LEN / 1000 + ' км, выберите покороче.', true); return; }
-    var l = lines[r.li], path = sub(l.coords, Math.min(A.s, r.s), Math.max(A.s, r.s));
-    dot(r.c, '#2563eb');
-    addSec(pl(path, '#2563eb', 14, { strokeOpacity: 0.35 }));
-    sec = { path: path, len: pathLen(path), kind: l.kind, lanes: l.kind === 'asphalt' ? l.lanes : 1 };
-    selecting = false; $('bSel').classList.remove('on');
-    $('bSim').disabled = false; $('dem').hidden = false;
-    info('Участок ' + Math.round(sec.len) + ' м, полос: ' + sec.lanes + '. Ищу светофоры…');
-    var la = sec.path.map(function (c) { return c[1]; }), lo = sec.path.map(function (c) { return c[0]; }), pad = 0.0006;
-    loadLights(Math.min.apply(null, la) - pad, Math.min.apply(null, lo) - pad, Math.max.apply(null, la) + pad, Math.max.apply(null, lo) + pad, function (ok) {
-      if (!sec) return;
-      var n = lightsOn().length;
-      info('Участок ' + Math.round(sec.len) + ' м, полос: ' + sec.lanes + (ok ? ', светофоров: ' + n : '. Светофоры не загрузились, симуляция без них.'), !ok);
+    if (!r) { info('Точка вне дороги. Точки можно ставить только на дороге.', true); return; }
+    pts.push(r);
+    if (pts.length > 1) {
+      var np = buildPath(pts);
+      if (!np) { pts.pop(); info('Нет проезда между точками (дороги не связаны).', true); return; }
+      if (pathLen(np) > MAXLEN) { pts.pop(); info('Маршрут длиннее ' + MAXLEN / 1000 + ' км, выберите покороче.', true); return; }
+      path = np; info('Участок ' + Math.round(pathLen(path)) + ' м. Ещё точка или «Готово».');
+    } else info('Первая точка поставлена. Теперь следующая.');
+    showSel();
+  }
+
+  // ---------- Симуляция: сотни легковых, десятки грузовиков, несколько автобусов ----------
+  var running = false, last = 0, acc = 0, lastStat = 0, t = 0, L = 0, lanes = [], waiting = [], lights = [], cum = [], binPl = [], nb = 0;
+  var fin = 0, total = 0, maxJam = 0, counts = {};
+
+  function newVeh(type) {
+    var k = TYPES[type];
+    return { type: type, len: k.len, a: k.a, v0: Math.max(6, k.v + (Math.random() * 2 - 1) * k.dv), s: 0, v: 0, lane: 0 };
+  }
+  function startSim() {
+    stopSim(true);
+    endSelect();
+    L = pathLen(path); cum = [0];
+    for (var i = 1; i < path.length; i++) cum.push(cum[i - 1] + dist(path[i - 1], path[i]));
+    // случайные количества; диапазоны гарантируют: легковых > грузовых > автобусов
+    counts = { bus: rnd(3, 8), truck: rnd(20, 60), car: rnd(150, 450) };
+    waiting = [];
+    Object.keys(counts).forEach(function (k) { for (var j = 0; j < counts[k]; j++) waiting.push(newVeh(k)); });
+    for (var a = waiting.length - 1; a > 0; a--) { var b = rnd(0, a), tmp = waiting[a]; waiting[a] = waiting[b]; waiting[b] = tmp; }
+    total = waiting.length; fin = 0; maxJam = 0; t = 0; acc = 0;
+    lanes = []; for (var l = 0; l < LANES; l++) lanes.push([]);
+    lights = [];
+    G.lights.forEach(function (c) {
+      var r = nearest(path, c);
+      if (r.d <= LIGHT_M && !lights.some(function (x) { return Math.abs(x.s - r.s) < 15; })) lights.push({ s: r.s, o: rnd(0, CYC - 1) });
+    });
+    nb = Math.ceil(L / BIN); binPl = [];
+    for (var q = 0; q < nb; q++) {
+      var p = sub(path, q * BIN, Math.min(L, (q + 1) * BIN));
+      if (p.length < 2) { binPl.push(null); continue; }
+      var o = pl(p, '#16a34a', 6); map.geoObjects.add(o); binPl.push(o);
+    }
+    $('bSim').textContent = '■ Стоп'; $('bSim').classList.add('on');
+    info('Легковых: ' + counts.car + ' · грузовых: ' + counts.truck + ' · автобусов: ' + counts.bus + ' · светофоров на маршруте: ' + lights.length);
+    running = true; last = performance.now(); requestAnimationFrame(frame);
+  }
+  function stopSim(clear) {
+    running = false;
+    $('bSim').textContent = '▶ Симуляция'; $('bSim').classList.remove('on');
+    if (clear) { binPl.forEach(function (o) { if (o) map.geoObjects.remove(o); }); binPl = []; lanes = []; waiting = []; lights = []; redraw(); }
+  }
+  $('bSim').onclick = function () { if (running) stopSim(false); else if (path) startSim(); };
+
+  function step(dt) {
+    t += dt;
+    var reds = [];
+    lights.forEach(function (l) { if ((t + l.o) % CYC >= GRN) reds.push(l.s); });
+    lanes.forEach(function (arr, li) {
+      for (var i = 0; i < arr.length; i++) {
+        var c = arr[i], lead = arr[i - 1], gap = 1e9, vl = c.v;
+        if (lead) { gap = lead.s - lead.len - c.s; vl = lead.v; }
+        for (var j = 0; j < reds.length; j++) if (reds[j] > c.s) { var g = reds[j] - c.s - 2; if (g < gap) { gap = g; vl = 0; } }
+        gap = Math.max(gap, 0.1);
+        var sStar = 2 + Math.max(0, c.v * 1.4 + c.v * (c.v - vl) / (2 * Math.sqrt(c.a * 2)));
+        var acc = c.a * (1 - Math.pow(c.v / c.v0, 4) - Math.pow(sStar / gap, 2));
+        c.v = Math.max(0, c.v + acc * dt); c.s += c.v * dt;
+        if (lead && c.s > lead.s - lead.len - 0.5) { c.s = lead.s - lead.len - 0.5; c.v = Math.min(c.v, lead.v); }
+      }
+      while (arr.length && arr[0].s >= L) { arr.shift(); fin++; }
+      var tail = arr[arr.length - 1];
+      if (waiting.length && (!tail || tail.s - tail.len > 12)) {
+        var v = waiting.pop(); v.lane = li; v.s = 0; v.v = Math.min(v.v0 * 0.6, tail ? tail.v : 99); arr.push(v);
+      }
     });
   }
-  function lightsOn() {
-    return lights.map(function (c) { var r = nearest(sec.path, c); return r.d <= LIGHT_M ? r.s : -1; }).filter(function (s) { return s >= 0; });
+  function frame(ts) {
+    if (!running) return;
+    acc += Math.min(0.1, (ts - last) / 1000) * SPEED; last = ts;
+    for (var n = 0; acc >= DT && n < 8; n++) { step(DT); acc -= DT; }
+    if (ts - lastStat > 300) { stats(); lastStat = ts; }
+    redraw();
+    if (fin >= total) { stats(); stopSim(false); info('Готово: все ' + total + ' машин проехали за ' + Math.round(t / 60 * 10) / 10 + ' мин. Максимальная пробка ~' + Math.round(maxJam) + ' м.'); return; }
+    requestAnimationFrame(frame);
   }
-
-  // ---------- Симуляция пробок (модель Нагеля — Шрекенберга, одна полоса) ----------
-  var timer = null, v, n, bins, binPl, lc, t, vmax;
-  function stopSim() { if (timer) clearInterval(timer); timer = null; $('bSim').textContent = '▶ Симуляция'; $('bSim').classList.remove('on'); }
-
-  $('d').oninput = function () { $('dv').textContent = this.value; };
-  $('bSim').onclick = function () {
-    if (timer) { stopSim(); return; }
-    n = Math.max(8, Math.round(sec.len / CELL)); v = []; for (var i = 0; i < n; i++) v.push(-1);
-    vmax = VMAX[sec.kind]; t = 0;
-    var seen = {};
-    lc = lightsOn().map(function (s, k) { return { i: Math.min(n - 1, Math.round(s / CELL)), o: k * 17 }; })
-      .filter(function (x) { if (seen[x.i]) return false; seen[x.i] = 1; return true; });
-    bins = Math.ceil(sec.len / BIN);
-    binPl && binPl.forEach(function (o) { map.geoObjects.remove(o); });
-    binPl = [];
-    for (var b = 0; b < bins; b++) {
-      var p = sub(sec.path, b * BIN, Math.min(sec.len, (b + 1) * BIN));
-      if (p.length < 2) { binPl.push(null); continue; }
-      var o = pl(p, '#16a34a', 7); map.geoObjects.add(o); binPl.push(o);
-    }
-    this.textContent = '■ Стоп'; this.classList.add('on');
-    timer = setInterval(function () { step(); step(); draw(); }, 100);   // ускорение ×20
-  };
-
-  function step() {
-    t++;
-    var red = {}, i, j, k;
-    lc.forEach(function (x) { if ((t + x.o) % CYCLE >= GREEN) red[x.i] = 1; });
-    var nv = []; for (i = 0; i < n; i++) nv.push(-1);
-    for (i = n - 1; i >= 0; i--) {
-      if (v[i] < 0) continue;
-      var vi = Math.min(v[i] + 1, vmax), ex = false;
-      for (j = 1; j <= vi; j++) {
-        k = i + j;
-        if (k >= n) { ex = true; break; }
-        if (v[k] >= 0 || red[k]) { vi = j - 1; break; }
-      }
-      if (ex) continue;                                  // машина покинула участок
-      if (vi > 0 && Math.random() < 0.2) vi--;           // случайное замедление
-      nv[i + vi] = vi;
-    }
-    if (nv[0] < 0 && !red[0] && Math.random() < (+$('d').value) / 3600) nv[0] = Math.min(1, vmax);  // въезд
-    v = nv;
-  }
-
-  function draw() {
-    var sum = [], cnt = [], b, i, tot = 0, all = 0;
-    for (b = 0; b < bins; b++) { sum.push(0); cnt.push(0); }
-    for (i = 0; i < n; i++) if (v[i] >= 0) {
-      b = Math.min(bins - 1, Math.floor(i * CELL / BIN)); sum[b] += v[i]; cnt[b]++; tot += v[i]; all++;
-    }
-    var jam = 0;
-    for (b = 0; b < bins; b++) {
-      var r = cnt[b] ? sum[b] / cnt[b] / vmax : 1, col = r > 0.6 ? '#16a34a' : r > 0.3 ? '#f59e0b' : '#dc2626';
-      if (col === '#dc2626') jam += BIN;
+  function stats() {
+    var sum = [], cnt = [], b, tot = 0, all = 0, jam = 0;
+    for (b = 0; b < nb; b++) { sum.push(0); cnt.push(0); }
+    lanes.forEach(function (arr) { arr.forEach(function (c) { b = Math.min(nb - 1, Math.floor(c.s / BIN)); sum[b] += c.v; cnt[b]++; tot += c.v; all++; }); });
+    for (b = 0; b < nb; b++) {
+      var r = cnt[b] ? sum[b] / cnt[b] / 13 : 1, col = r > 0.6 ? '#16a34a' : r > 0.3 ? '#f59e0b' : '#dc2626';
+      if (r <= 0.3) jam += BIN;
       if (binPl[b]) binPl[b].options.set('strokeColor', col);
     }
-    var kmh = (all ? tot / all : vmax) * CELL * 3.6;
-    $('stat').innerHTML = 'Время: ' + Math.floor(t / 60) + ' мин · машин: ' + all + '<br>Средняя скорость: ' + Math.round(kmh) + ' км/ч (максимум ' + Math.round(vmax * CELL * 3.6) +
-      ')<br>Пробка (красное): ~' + Math.min(Math.round(jam), Math.round(sec.len)) + ' м · светофоров: ' + lc.length;
+    maxJam = Math.max(maxJam, jam);
+    $('stat').innerHTML = 'Время: ' + Math.floor(t / 60) + ' мин · на дороге: ' + all + ' · ждут въезда: ' + waiting.length + ' · проехало: ' + fin +
+      '<br>Средняя скорость: ' + Math.round((all ? tot / all : 0) * 3.6) + ' км/ч · пробка (красное): ~' + Math.round(jam) + ' м';
   }
+
+  // ---------- Рисование на canvas: светофоры и машины ----------
+  function redraw() {
+    if (!map || !ctx) return;
+    ctx.clearRect(0, 0, W, H);
+    var i, c;
+    if (G) G.lights.forEach(function (l) {
+      var p = proj(l), onRoute = false, red = false;
+      lights.forEach(function (x) { var r = nearest(path, l); if (Math.abs(r.s - x.s) < 15 && r.d <= LIGHT_M) { onRoute = true; red = (t + x.o) % CYC >= GRN; } });
+      ctx.beginPath(); ctx.arc(p[0], p[1], 5, 0, 6.2832);
+      ctx.fillStyle = running && onRoute ? (red ? '#dc2626' : '#16a34a') : '#f59e0b'; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#111827'; ctx.stroke();
+    });
+    if (!running || !path) return;
+    var sp = path.map(proj);
+    lanes.forEach(function (arr) {
+      arr.forEach(function (v) {
+        var lo = 0, hi = cum.length - 1;
+        while (hi - lo > 1) { var m = (lo + hi) >> 1; if (cum[m] <= v.s) lo = m; else hi = m; }
+        var f = (v.s - cum[lo]) / Math.max(0.01, cum[hi] - cum[lo]), A = sp[lo], B = sp[hi];
+        var dx = B[0] - A[0], dy = B[1] - A[1], d = Math.hypot(dx, dy) || 1, off = (v.lane - (LANES - 1) / 2) * 5;
+        var x = A[0] + f * dx - dy / d * off, y = A[1] + f * dy + dx / d * off, k = TYPES[v.type];
+        ctx.beginPath(); ctx.arc(x, y, k.r, 0, 6.2832); ctx.fillStyle = k.col; ctx.fill();
+        ctx.lineWidth = 0.8; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+      });
+    });
+  }
+
+  $('bClr').onclick = function () { endSelect(); clearSel(); G = null; redraw(); info(''); };
 
   // ---------- Старт ----------
   function init() {
     map = new ymaps.Map('map', { center: [55.75, 37.62], zoom: 10, controls: ['zoomControl'] });
-    drawRoads();
-    map.events.add('click', function (e) { if (selecting) { var p = e.get('coords'); pick([p[1], p[0]]); } });
+    pr = map.options.get('projection');
+    userLines.forEach(function (l) { map.geoObjects.add(pl(l.coords, '#6b7280', 5)); });
+    if (userLines.length) {
+      var la = [], lo = [];
+      userLines.forEach(function (l) { l.coords.forEach(function (c) { lo.push(c[0]); la.push(c[1]); }); });
+      map.setBounds([[Math.min.apply(null, la), Math.min.apply(null, lo)], [Math.max.apply(null, la), Math.max.apply(null, lo)]], { checkZoomRange: true, zoomMargin: 60 });
+    }
+    map.events.add('click', function (e) { if (selecting && G) { var p = e.get('coords'); pick([p[1], p[0]]); } });
+    map.events.add(['actiontick', 'actionend', 'boundschange', 'sizechange'], redraw);
     layout();
+    setTraffic(true);   // пробки в реальном времени включены сразу
+    info('Пробки включены. Приблизьте карту к нужному месту (масштаб от 15) и нажмите «Точки».');
   }
   window.addEventListener('resize', layout);
   layout();
 
-  if (!YA_KEY || YA_KEY.indexOf('ВСТАВЬ') === 0) { info('Нужен API-ключ Яндекс Карт: впишите его в YA_KEY в начале скрипта.', true); return; }
   var s = document.createElement('script');
   s.src = 'https://api-maps.yandex.ru/2.1/?apikey=' + encodeURIComponent(YA_KEY) + '&lang=ru_RU&load=package.full';
   s.onload = function () { if (window.ymaps) ymaps.ready(init); else info('Яндекс Карты не инициализировались. Проверьте ключ и его ограничения по домену.', true); };
